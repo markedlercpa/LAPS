@@ -1,0 +1,278 @@
+// LAPS — Sales Cycle Management
+// Prisma schema. Postgres in production (Neon).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Auth.js (NextAuth) models — Account holds the M365/Graph OAuth tokens
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  REP
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  role          Role      @default(REP)
+  createdAt     DateTime  @default(now())
+
+  accounts Account[]
+  sessions Session[]
+
+  // Ownership relations across the LAPS pipeline
+  leads        Lead[]         @relation("LeadOwner")
+  appointments Appointment[]  @relation("AppointmentOwner")
+  proposals    Proposal[]     @relation("ProposalOwner")
+  activities   Activity[]
+  actionItems  ActionItem[]   @relation("ActionItemAssignee")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------------------------------------------------------------------------
+// LAPS pipeline
+// ---------------------------------------------------------------------------
+
+enum Stage {
+  NEW
+  APPOINTMENT
+  PROPOSAL
+  CLOSED_WON
+  CLOSED_LOST
+}
+
+model Lead {
+  id          String   @id @default(cuid())
+  firstName   String
+  lastName    String
+  companyName String?
+  leadSource  String?
+  email       String?
+  phone       String?
+  stage       Stage    @default(NEW)
+  lostReason  String?
+  notes       String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ownerId String?
+  owner   User?   @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  activities   Activity[]
+  appointments Appointment[]
+  proposals    Proposal[]
+  actionItems  ActionItem[]
+
+  @@index([stage])
+  @@index([ownerId])
+}
+
+enum ActivityType {
+  EMAIL_SENT
+  EMAIL_RECEIVED
+  TEXT
+  CALL
+  NOTE
+  MEETING
+  OTHER
+}
+
+enum Direction {
+  IN
+  OUT
+}
+
+model Activity {
+  id         String       @id @default(cuid())
+  leadId     String
+  userId     String?
+  type       ActivityType
+  direction  Direction    @default(OUT)
+  subject    String?
+  body       String?      @db.Text
+  occurredAt DateTime     @default(now())
+  metadata   Json?
+
+  lead Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([leadId])
+  @@index([type])
+}
+
+enum AppointmentStatus {
+  BOOKED
+  COMPLETED
+  NO_SHOW
+  CANCELED
+}
+
+model Appointment {
+  id          String            @id @default(cuid())
+  leadId      String
+  ownerId     String?
+  title       String
+  scheduledAt DateTime
+  durationMin Int               @default(30)
+  status      AppointmentStatus @default(BOOKED)
+  graphEventId String?          @unique
+  notes       String?           @db.Text
+  createdAt   DateTime          @default(now())
+
+  lead        Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  owner       User?        @relation("AppointmentOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  actionItems ActionItem[]
+
+  @@index([leadId])
+  @@index([scheduledAt])
+}
+
+enum ActionItemStatus {
+  OPEN
+  DONE
+}
+
+enum ActionItemSource {
+  MANUAL
+  FIREFLIES
+}
+
+model ActionItem {
+  id            String           @id @default(cuid())
+  appointmentId String?
+  leadId        String?
+  assigneeId    String?
+  description   String
+  dueDate       DateTime?
+  status        ActionItemStatus @default(OPEN)
+  source        ActionItemSource @default(MANUAL)
+  createdAt     DateTime         @default(now())
+
+  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  lead        Lead?        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  assignee    User?        @relation("ActionItemAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  @@index([appointmentId])
+  @@index([status])
+}
+
+enum ProposalStatus {
+  DRAFT
+  SENT
+  VIEWED
+  SIGNED
+  WON
+  LOST
+}
+
+model Proposal {
+  id                   String         @id @default(cuid())
+  leadId               String
+  ownerId              String?
+  title                String
+  status               ProposalStatus @default(DRAFT)
+  estimatedDeliveryCost Decimal       @default(0) @db.Decimal(12, 2)
+  createdAt            DateTime       @default(now())
+  sentAt              DateTime?
+  signedAt            DateTime?
+  wonAt               DateTime?
+  lostAt              DateTime?
+  lostReason          String?
+
+  lead      Lead                @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  owner     User?               @relation("ProposalOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  lineItems ProposalLineItem[]
+  handoff   Handoff?
+
+  @@index([leadId])
+  @@index([status])
+}
+
+model ProposalLineItem {
+  id          String  @id @default(cuid())
+  proposalId  String
+  description String
+  quantity    Decimal @default(1) @db.Decimal(12, 2)
+  unitPrice   Decimal @default(0) @db.Decimal(12, 2)
+  sortOrder   Int     @default(0)
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@index([proposalId])
+}
+
+enum DeliveryStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETE
+}
+
+model Handoff {
+  id             String         @id @default(cuid())
+  proposalId     String         @unique
+  deliveryStatus DeliveryStatus @default(PENDING)
+  assignedTo     String?
+  createdAt      DateTime       @default(now())
+
+  proposal  Proposal        @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  checklist ChecklistItem[]
+}
+
+model ChecklistItem {
+  id          String    @id @default(cuid())
+  handoffId   String
+  label       String
+  done        Boolean   @default(false)
+  dueDate     DateTime?
+  completedAt DateTime?
+  sortOrder   Int       @default(0)
+
+  handoff Handoff @relation(fields: [handoffId], references: [id], onDelete: Cascade)
+
+  @@index([handoffId])
+}
