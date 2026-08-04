@@ -26,5 +26,11 @@ services:
         generateValue: true
       - key: ALLOW_DEV_LOGIN
         value: "true"
+      # Public URL so Auth.js redirects to the deployed host (not localhost).
+      # Update this if the service URL changes.
+      - key: AUTH_URL
+        value: https://laps-wxm8.onrender.com
+      - key: NEXTAUTH_URL
+        value: https://laps-wxm8.onrender.com
       - key: NODE_VERSION
         value: "22"
