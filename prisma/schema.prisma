@@ -20,13 +20,14 @@ enum Role {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String    @unique
-  emailVerified DateTime?
-  image         String?
-  role          Role      @default(REP)
-  createdAt     DateTime  @default(now())
+  id             String    @id @default(cuid())
+  name           String?
+  email          String    @unique
+  emailVerified  DateTime?
+  image          String?
+  role           Role      @default(REP)
+  hubspotOwnerId String?   @unique
+  createdAt      DateTime  @default(now())
 
   accounts Account[]
   sessions Session[]
@@ -88,6 +89,7 @@ enum Stage {
 
 model Lead {
   id          String   @id @default(cuid())
+  hubspotId   String?  @unique
   firstName   String
   lastName    String
   companyName String?
@@ -212,6 +214,7 @@ enum ProposalStatus {
 
 model Proposal {
   id                   String         @id @default(cuid())
+  hubspotId            String?        @unique
   leadId               String
   ownerId              String?
   title                String

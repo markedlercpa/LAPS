@@ -56,7 +56,7 @@ export function LeadsTable({
     <DataTable
       columns={columns}
       data={rows}
-      searchKeys={["firstName", "lastName", "companyName", "email"]}
+      searchKeys={["firstName", "lastName", "companyName", "email", "leadSource"]}
       rowHref={(r) => `/leads/${r.id}`}
       emptyMessage="No leads yet. Add your first lead to get started."
       toolbarLeft={toolbarLeft}
