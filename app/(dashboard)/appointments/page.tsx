@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
-import { StatCard } from "@/components/stat-card";
+import { MetricRow } from "@/components/metric-row";
 import { AppointmentsView, type ApptRow } from "@/components/appointments/appointments-view";
 import { NewAppointmentButton, type LeadOption } from "@/components/appointments/new-appointment-button";
 import {
@@ -77,17 +77,22 @@ export default async function AppointmentsPage() {
   return (
     <div>
       <PageHeader
+        eyebrow="02 — A"
         title="Appointments"
         description="Calls booked and completed, with action items."
       >
         <NewAppointmentButton leads={leadOptions} />
       </PageHeader>
 
-      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <StatCard label="Total" value={appointments.length} />
-        <StatCard label="Booked" value={booked} />
-        <StatCard label="Upcoming" value={upcoming} />
-        <StatCard label="Completed" value={completed} />
+      <div className="mb-8">
+        <MetricRow
+          metrics={[
+            { label: "Total", value: appointments.length },
+            { label: "Booked", value: booked },
+            { label: "Upcoming", value: upcoming },
+            { label: "Completed", value: completed },
+          ]}
+        />
       </div>
 
       <div className="space-y-6">

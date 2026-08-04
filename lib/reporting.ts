@@ -157,6 +157,96 @@ export async function getOpenPipeline(): Promise<{
   };
 }
 
+export type FunnelRow = {
+  letter: string;
+  label: string;
+  count: number;
+  convNote: string;
+  tone: "ink" | "n800" | "n600" | "accent";
+};
+
+export type PipelineOverview = {
+  openValue: number;
+  openCount: number;
+  wonValue90d: number;
+  wonCount90d: number;
+  lostCount90d: number;
+  winRate: number; // won / (won + lost) over 90d
+  avgCycleDays: number | null;
+  funnel: FunnelRow[];
+};
+
+/** Owner-facing pipeline overview — headline metrics + 90-day funnel. Derived. */
+export async function getPipelineOverview(): Promise<PipelineOverview> {
+  const start = new Date(Date.now() - 90 * 86_400_000);
+
+  const [open, leadsCreated, apptsBooked, proposals] = await Promise.all([
+    getOpenPipeline(),
+    prisma.lead.count({ where: { createdAt: { gte: start } } }),
+    prisma.appointment.count({ where: { scheduledAt: { gte: start } } }),
+    prisma.proposal.findMany({
+      select: {
+        status: true,
+        sentAt: true,
+        wonAt: true,
+        lostAt: true,
+        lead: { select: { createdAt: true } },
+        lineItems: { select: { quantity: true, unitPrice: true } },
+      },
+    }),
+  ]);
+
+  const sent90 = proposals.filter((p) => p.sentAt && p.sentAt >= start);
+  const won90 = proposals.filter((p) => p.status === "WON" && p.wonAt && p.wonAt >= start);
+  const lost90 = proposals.filter((p) => p.status === "LOST" && p.lostAt && p.lostAt >= start);
+
+  const wonValue90d = won90.reduce((s, p) => s + lineItemsTotal(p.lineItems), 0);
+  const cycles = won90
+    .filter((p) => p.wonAt && p.lead?.createdAt)
+    .map((p) => daysBetween(p.wonAt as Date, p.lead!.createdAt));
+  const avgCycleDays =
+    cycles.length > 0 ? Math.round(cycles.reduce((a, b) => a + b, 0) / cycles.length) : null;
+
+  const pct = (num: number, den: number) =>
+    den > 0 ? `${Math.round((num / den) * 100)}%` : "—";
+
+  const funnel: FunnelRow[] = [
+    { letter: "L", label: "Leads created", count: leadsCreated, convNote: "—", tone: "ink" },
+    {
+      letter: "A",
+      label: "Appointments booked",
+      count: apptsBooked,
+      convNote: `${pct(apptsBooked, leadsCreated)} of leads`,
+      tone: "n800",
+    },
+    {
+      letter: "P",
+      label: "Proposals sent",
+      count: sent90.length,
+      convNote: `${pct(sent90.length, apptsBooked)} of appts`,
+      tone: "n600",
+    },
+    {
+      letter: "S",
+      label: "Closed won",
+      count: won90.length,
+      convNote: `${pct(won90.length, sent90.length)} of proposals`,
+      tone: "accent",
+    },
+  ];
+
+  return {
+    openValue: open.totalValue,
+    openCount: open.totalCount,
+    wonValue90d,
+    wonCount90d: won90.length,
+    lostCount90d: lost90.length,
+    winRate: won90.length + lost90.length > 0 ? won90.length / (won90.length + lost90.length) : 0,
+    avgCycleDays,
+    funnel,
+  };
+}
+
 export type RepRow = {
   repId: string;
   repName: string;

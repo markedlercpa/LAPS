@@ -11,17 +11,21 @@ core app; e-sign, Stripe payments, and QBO invoicing land in later phases.
 
 - **Next.js** (App Router, TypeScript) + Server Actions
 - **Postgres** via **Prisma**
-- **Tailwind** + hand-rolled shadcn-style UI, **react-big-calendar**, **Recharts**
+- **Tailwind** + a hand-rolled **Modernist** design system (Archivo type, flat,
+  square, near-mono red, strong 2px rules) — all tokens live in `app/globals.css`.
+  Charts and the calendar are built from `div`s/tokens (no charting or calendar
+  library).
 - **Auth.js (NextAuth)** with **Microsoft Entra ID** (M365) — one sign-in that
   also grants delegated **Graph** scopes for sending email and syncing calendars
   as the signed-in rep. A password-less **dev login** fallback is available locally.
 
-## Features (Phase 1)
+## Features
 
 | Section | What it does |
 | --- | --- |
-| **Lead Generation** | Leads table (name, company, source, email, phone, created, owner, stage) + lead detail with a full **activity timeline** (emails, calls, texts, notes). Send email via M365 Graph; sync inbound replies into the timeline. |
-| **Appointments** | Table + **calendar** view, status (booked/completed/no-show), **action items**, and one-click **M365 calendar sync**. |
+| **Pipeline** (landing) | Owner-facing funnel overview: headline metrics (open pipeline, closed-won 90d, win rate, avg cycle), a 90-day LAPS funnel with conversions, and a by-rep table. |
+| **Lead Generation** | Leads **table + board (kanban)** views (name, company, source, email, owner, stage) + lead detail with a full **activity timeline** (emails, calls, texts, notes). Send email via M365 Graph; sync inbound replies into the timeline. |
+| **Appointments** | Table + token-built **calendar** view, status (booked/completed/no-show), **action items**, and one-click **M365 calendar sync**. |
 | **Proposals** | Table of open proposals + editor with **line items** and internal **delivery-budget → estimated margin**. Status workflow drives the pipeline. |
 | **Sales Closed** | Closed-won table + **delivery handoff** status + templated **onboarding checklist** (surprise gift, onboarding, activation, case study, Google review). |
 | **Reporting** | Weekly / monthly / quarterly LAPS throughput, open pipeline by stage, and per-rep volume / close rate / avg sales cycle. |

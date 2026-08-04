@@ -1,16 +1,7 @@
 "use client";
 
 import type { ActivityType } from "@prisma/client";
-import {
-  Mail,
-  MailOpen,
-  Phone,
-  MessageSquare,
-  StickyNote,
-  CalendarDays,
-  Circle,
-} from "lucide-react";
-import { formatDateTime } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 export type ActivityRow = {
   id: string;
@@ -20,16 +11,6 @@ export type ActivityRow = {
   body: string | null;
   occurredAt: string;
   userName: string;
-};
-
-const ICONS: Record<ActivityType, typeof Mail> = {
-  EMAIL_SENT: Mail,
-  EMAIL_RECEIVED: MailOpen,
-  CALL: Phone,
-  TEXT: MessageSquare,
-  NOTE: StickyNote,
-  MEETING: CalendarDays,
-  OTHER: Circle,
 };
 
 const LABELS: Record<ActivityType, string> = {
@@ -42,46 +23,56 @@ const LABELS: Record<ActivityType, string> = {
   OTHER: "Activity",
 };
 
+function fmtDate(iso: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(iso));
+}
+function fmtTime(iso: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(iso));
+}
+
 export function ActivityTimeline({ activities }: { activities: ActivityRow[] }) {
   if (activities.length === 0) {
-    return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        No activity logged yet.
-      </p>
-    );
+    return <p className="py-6 text-[14px] text-muted">No activity logged yet.</p>;
   }
 
   return (
-    <ol className="space-y-4">
-      {activities.map((a) => {
-        const Icon = ICONS[a.type];
-        return (
-          <li key={a.id} className="flex gap-3">
-            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-              <Icon className="h-4 w-4" />
+    <div>
+      {activities.map((a) => (
+        <div
+          key={a.id}
+          className="grid grid-cols-[120px_1fr] gap-6 border-b border-divider py-4 max-sm:grid-cols-1 max-sm:gap-1"
+        >
+          <div>
+            <div className="text-[12px] font-semibold [font-variant-numeric:tabular-nums]">
+              {fmtDate(a.occurredAt)}
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium">
-                  {LABELS[a.type]}
-                  {a.subject ? <span className="font-normal">: {a.subject}</span> : null}
-                </span>
-                <span className="whitespace-nowrap text-xs text-muted-foreground">
-                  {formatDateTime(a.occurredAt)}
-                </span>
-              </div>
-              {a.body && (
-                <p className="mt-0.5 whitespace-pre-wrap text-sm text-muted-foreground">
-                  {a.body}
-                </p>
+            <div className="text-[12px] text-muted">{fmtTime(a.occurredAt)}</div>
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={cn("tag", a.type === "CALL" ? "tag-accent" : "tag-neutral")}>
+                {LABELS[a.type]}
+              </span>
+              {a.subject && (
+                <span className="font-heading text-[14px] font-extrabold">{a.subject}</span>
               )}
-              <p className="mt-0.5 text-xs text-muted-foreground/70">
-                {a.direction === "IN" ? "Inbound" : "Outbound"} · {a.userName}
-              </p>
             </div>
-          </li>
-        );
-      })}
-    </ol>
+            {a.body && (
+              <p className="mb-0 mt-1 whitespace-pre-wrap text-[14px] text-muted">{a.body}</p>
+            )}
+            <div className="mt-1 text-[11px] text-muted">
+              {a.direction === "IN" ? "Inbound" : "Outbound"} · {a.userName}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

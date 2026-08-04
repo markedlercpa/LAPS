@@ -20,6 +20,7 @@ export default async function ReportingPage() {
   return (
     <div>
       <PageHeader
+        eyebrow="05 — Reporting"
         title="Reporting"
         description="LAPS performance, open pipeline, and per-rep results."
       />

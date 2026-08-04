@@ -21,8 +21,8 @@ export default async function DashboardLayout({
             role: session.user.role,
           }}
         />
-        <main className="flex-1 overflow-y-auto bg-muted/20">
-          <div className="mx-auto max-w-7xl p-6">{children}</div>
+        <main className="flex-1 overflow-y-auto bg-bg">
+          <div className="mx-auto max-w-frame px-12 pb-[72px] pt-8">{children}</div>
         </main>
       </div>
     </SessionProvider>

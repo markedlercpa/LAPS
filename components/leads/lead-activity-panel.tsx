@@ -2,17 +2,10 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import { Mail, RefreshCw } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  ActivityTimeline,
-  type ActivityRow,
-} from "@/components/leads/activity-timeline";
+import { MicroLabel } from "@/components/micro-label";
+import { ActivityTimeline, type ActivityRow } from "@/components/leads/activity-timeline";
 import { logActivity, sendLeadEmail, syncLeadInbound } from "@/app/(dashboard)/leads/actions";
 
 export function LeadActivityPanel({
@@ -26,14 +19,12 @@ export function LeadActivityPanel({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
 
-  // Log activity state
   const [logType, setLogType] = useState("CALL");
   const [logSubject, setLogSubject] = useState("");
   const [logBody, setLogBody] = useState("");
 
-  // Email state
   const [to, setTo] = useState(leadEmail ?? "");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
@@ -47,7 +38,7 @@ export function LeadActivityPanel({
         setLogSubject("");
         setLogBody("");
         router.refresh();
-      } else setMsg(res.error ?? "Failed");
+      } else setMsg({ text: res.error ?? "Failed", error: true });
     });
   };
 
@@ -57,11 +48,15 @@ export function LeadActivityPanel({
     startTransition(async () => {
       const res = await sendLeadEmail({ leadId, to, subject, body });
       if (res.ok) {
-        setMsg(res.offline ? "Logged (M365 not connected — email not actually sent)." : "Email sent.");
+        setMsg({
+          text: res.offline
+            ? "Logged (M365 not connected — email not actually sent)."
+            : "Email sent.",
+        });
         setSubject("");
         setBody("");
         router.refresh();
-      } else setMsg(res.error ?? "Failed to send");
+      } else setMsg({ text: res.error ?? "Failed to send", error: true });
     });
   };
 
@@ -70,86 +65,94 @@ export function LeadActivityPanel({
     startTransition(async () => {
       const res = await syncLeadInbound(leadId);
       if (res.ok) {
-        setMsg(`Synced. ${res.created ?? 0} new inbound message(s).`);
+        setMsg({ text: `Synced. ${res.created ?? 0} new inbound message(s).` });
         router.refresh();
-      } else setMsg(res.error ?? "Sync failed");
+      } else setMsg({ text: res.error ?? "Sync failed", error: true });
     });
   };
 
   return (
-    <div className="space-y-4">
-      <Tabs defaultValue="email">
+    <div>
+      <MicroLabel>Interactions</MicroLabel>
+
+      <Tabs defaultValue="email" className="mt-3">
         <TabsList>
-          <TabsTrigger value="email">Send Email</TabsTrigger>
-          <TabsTrigger value="log">Log Activity</TabsTrigger>
+          <TabsTrigger value="email">Send email</TabsTrigger>
+          <TabsTrigger value="log">Log activity</TabsTrigger>
         </TabsList>
 
         <TabsContent value="email">
-          <form onSubmit={submitEmail} className="space-y-3">
-            <div className="space-y-1.5">
-              <Label>To</Label>
-              <Input type="email" value={to} onChange={(e) => setTo(e.target.value)} required />
+          <form onSubmit={submitEmail} className="field space-y-3">
+            <div>
+              <label>To</label>
+              <input type="email" className="input" value={to} onChange={(e) => setTo(e.target.value)} required />
             </div>
-            <div className="space-y-1.5">
-              <Label>Subject</Label>
-              <Input value={subject} onChange={(e) => setSubject(e.target.value)} required />
+            <div>
+              <label>Subject</label>
+              <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} required />
             </div>
-            <div className="space-y-1.5">
-              <Label>Message</Label>
-              <Textarea
+            <div>
+              <label>Message</label>
+              <textarea
+                className="input min-h-[120px]"
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
-                className="min-h-[120px]"
                 required
               />
             </div>
             <div className="flex items-center gap-2">
-              <Button type="submit" disabled={pending}>
+              <button type="submit" className="btn btn-primary" disabled={pending}>
+                <Mail className="h-4 w-4" />
                 {pending ? "Sending…" : "Send email"}
-              </Button>
+              </button>
               {leadEmail && (
-                <Button type="button" variant="outline" onClick={doSync} disabled={pending}>
+                <button type="button" className="btn btn-secondary" onClick={doSync} disabled={pending}>
                   <RefreshCw className="h-4 w-4" />
                   Sync replies
-                </Button>
+                </button>
               )}
             </div>
           </form>
         </TabsContent>
 
         <TabsContent value="log">
-          <form onSubmit={submitLog} className="space-y-3">
+          <form onSubmit={submitLog} className="field space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Type</Label>
-                <Select value={logType} onChange={(e) => setLogType(e.target.value)}>
+              <div>
+                <label>Type</label>
+                <select className="input" value={logType} onChange={(e) => setLogType(e.target.value)}>
                   <option value="CALL">Call</option>
                   <option value="TEXT">Text</option>
                   <option value="NOTE">Note</option>
                   <option value="MEETING">Meeting</option>
                   <option value="OTHER">Other</option>
-                </Select>
+                </select>
               </div>
-              <div className="space-y-1.5">
-                <Label>Subject</Label>
-                <Input value={logSubject} onChange={(e) => setLogSubject(e.target.value)} />
+              <div>
+                <label>Subject</label>
+                <input className="input" value={logSubject} onChange={(e) => setLogSubject(e.target.value)} />
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>Details</Label>
-              <Textarea value={logBody} onChange={(e) => setLogBody(e.target.value)} />
+            <div>
+              <label>Details</label>
+              <textarea className="input" value={logBody} onChange={(e) => setLogBody(e.target.value)} />
             </div>
-            <Button type="submit" disabled={pending}>
+            <button type="submit" className="btn btn-primary" disabled={pending}>
               {pending ? "Saving…" : "Log activity"}
-            </Button>
+            </button>
           </form>
         </TabsContent>
       </Tabs>
 
-      {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
+      {msg && (
+        <p className={msg.error ? "mt-3 text-[14px] text-accent-700" : "mt-3 text-[14px] text-muted"}>
+          {msg.text}
+        </p>
+      )}
 
-      <div className="border-t pt-4">
-        <h3 className="mb-3 text-sm font-semibold">Activity Timeline</h3>
+      <hr className="hr" />
+      <MicroLabel>Activity timeline</MicroLabel>
+      <div className="mt-2">
         <ActivityTimeline activities={activities} />
       </div>
     </div>

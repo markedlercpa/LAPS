@@ -4,20 +4,12 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { ArrowUpDown, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
 export type Column<T> = {
   key: string;
   header: string;
   sortable?: boolean;
+  numeric?: boolean;
   className?: string;
   render?: (row: T) => React.ReactNode;
   sortValue?: (row: T) => string | number;
@@ -29,12 +21,16 @@ export function DataTable<T extends { id: string }>({
   searchKeys,
   rowHref,
   emptyMessage = "No records yet.",
+  toolbarLeft,
+  searchPlaceholder = "Search…",
 }: {
   columns: Column<T>[];
   data: T[];
   searchKeys?: (keyof T)[];
   rowHref?: (row: T) => string;
   emptyMessage?: string;
+  toolbarLeft?: React.ReactNode;
+  searchPlaceholder?: string;
 }) {
   const router = useRouter();
   const [query, setQuery] = React.useState("");
@@ -46,9 +42,7 @@ export function DataTable<T extends { id: string }>({
     if (query && searchKeys?.length) {
       const q = query.toLowerCase();
       rows = rows.filter((r) =>
-        searchKeys.some((k) =>
-          String(r[k] ?? "").toLowerCase().includes(q),
-        ),
+        searchKeys.some((k) => String(r[k] ?? "").toLowerCase().includes(q)),
       );
     }
     if (sortKey) {
@@ -73,71 +67,73 @@ export function DataTable<T extends { id: string }>({
     }
   };
 
-  return (
-    <div className="space-y-3">
-      {searchKeys?.length ? (
-        <div className="relative max-w-xs">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="pl-8"
-          />
-        </div>
-      ) : null}
+  const showToolbar = Boolean(toolbarLeft) || Boolean(searchKeys?.length);
 
-      <div className="rounded-lg border bg-card">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              {columns.map((col) => (
-                <TableHead key={col.key} className={col.className}>
-                  {col.sortable ? (
-                    <button
-                      className="inline-flex items-center gap-1 hover:text-foreground"
-                      onClick={() => toggleSort(col.key)}
-                    >
-                      {col.header}
-                      <ArrowUpDown className="h-3 w-3" />
-                    </button>
-                  ) : (
-                    col.header
-                  )}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={columns.length}
-                  className="py-10 text-center text-muted-foreground"
-                >
-                  {emptyMessage}
-                </TableCell>
-              </TableRow>
-            ) : (
-              filtered.map((row) => (
-                <TableRow
-                  key={row.id}
-                  className={rowHref ? "cursor-pointer" : undefined}
-                  onClick={rowHref ? () => router.push(rowHref(row)) : undefined}
-                >
-                  {columns.map((col) => (
-                    <TableCell key={col.key} className={col.className}>
-                      {col.render
-                        ? col.render(row)
-                        : String((row as Record<string, unknown>)[col.key] ?? "—")}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+  return (
+    <div className="space-y-4">
+      {showToolbar && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>{toolbarLeft}</div>
+          {searchKeys?.length ? (
+            <div className="relative w-[300px] max-w-full">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600" />
+              <input
+                className="input pl-8"
+                placeholder={searchPlaceholder}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      <table className="table">
+        <thead>
+          <tr>
+            {columns.map((col) => (
+              <th key={col.key} className={cn(col.numeric && "num", col.className)}>
+                {col.sortable ? (
+                  <button
+                    className="inline-flex items-center gap-1 hover:text-ink"
+                    onClick={() => toggleSort(col.key)}
+                  >
+                    {col.header}
+                    <ArrowUpDown className="h-3 w-3" />
+                  </button>
+                ) : (
+                  col.header
+                )}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.length === 0 ? (
+            <tr>
+              <td colSpan={columns.length} className="text-muted">
+                {emptyMessage}
+              </td>
+            </tr>
+          ) : (
+            filtered.map((row) => (
+              <tr
+                key={row.id}
+                className={rowHref ? "cursor-pointer" : undefined}
+                onClick={rowHref ? () => router.push(rowHref(row)) : undefined}
+              >
+                {columns.map((col) => (
+                  <td key={col.key} className={cn(col.numeric && "num", col.className)}>
+                    {col.render
+                      ? col.render(row)
+                      : String((row as Record<string, unknown>)[col.key] ?? "—")}
+                  </td>
+                ))}
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }

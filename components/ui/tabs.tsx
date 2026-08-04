@@ -35,17 +35,9 @@ export function Tabs({
   );
 }
 
+/** Renders as the Modernist `.seg` segmented control. */
 export function TabsList({ className, children }: { className?: string; children: React.ReactNode }) {
-  return (
-    <div
-      className={cn(
-        "inline-flex h-9 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground",
-        className,
-      )}
-    >
-      {children}
-    </div>
-  );
+  return <div className={cn("seg", className)}>{children}</div>;
 }
 
 export function TabsTrigger({ value, children }: { value: string; children: React.ReactNode }) {
@@ -55,10 +47,7 @@ export function TabsTrigger({ value, children }: { value: string; children: Reac
     <button
       type="button"
       onClick={() => ctx.setValue(value)}
-      className={cn(
-        "inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium transition-all",
-        active ? "bg-background text-foreground shadow" : "hover:text-foreground",
-      )}
+      className={cn("seg-opt", active && "bg-accent text-bg")}
     >
       {children}
     </button>

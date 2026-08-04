@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
-import { StatCard } from "@/components/stat-card";
+import { MetricRow } from "@/components/metric-row";
 import { ProposalsTable, type ProposalRow } from "@/components/proposals/proposals-table";
 import { NewProposalButton, type LeadOption } from "@/components/proposals/new-proposal-button";
 import { lineItemsTotal } from "@/lib/reporting";
@@ -57,22 +57,27 @@ export default async function ProposalsPage() {
   return (
     <div>
       <PageHeader
+        eyebrow="03 — P"
         title="Proposals"
         description="Open proposals with scope, pricing, and internal margin."
       >
         <NewProposalButton leads={leadOptions} />
       </PageHeader>
 
-      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
-        <StatCard label="Open Proposals" value={rows.length} />
-        <StatCard label="Open Pipeline Value" value={formatCurrency(totalOpenValue)} />
-        <StatCard
-          label="Avg Margin"
-          value={`${
-            rows.length
-              ? Math.round(rows.reduce((s, r) => s + r.marginPct, 0) / rows.length)
-              : 0
-          }%`}
+      <div className="mb-8">
+        <MetricRow
+          metrics={[
+            { label: "Open proposals", value: rows.length },
+            { label: "Open pipeline value", value: formatCurrency(totalOpenValue) },
+            {
+              label: "Avg margin",
+              value: `${
+                rows.length
+                  ? Math.round(rows.reduce((s, r) => s + r.marginPct, 0) / rows.length)
+                  : 0
+              }%`,
+            },
+          ]}
         />
       </div>
 

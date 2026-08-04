@@ -1,34 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import type { LapsRow, PipelineStageRow, RepRow } from "@/lib/reporting";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { StatCard } from "@/components/stat-card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { PROPOSAL_STATUS_LABELS } from "@/lib/constants";
-import { formatCurrency } from "@/lib/utils";
 import type { ProposalStatus } from "@prisma/client";
+import { MicroLabel } from "@/components/micro-label";
+import { RepTable } from "@/components/reporting/rep-table";
+import { PROPOSAL_STATUS_LABELS } from "@/lib/constants";
+import { formatCurrency, cn } from "@/lib/utils";
 
 type LapsBundle = { week: LapsRow[]; month: LapsRow[]; quarter: LapsRow[] };
+type Tab = "laps" | "pipeline" | "reps";
 
 export function ReportingView({
   laps,
@@ -39,201 +20,221 @@ export function ReportingView({
   pipeline: { rows: PipelineStageRow[]; totalCount: number; totalValue: number };
   reps: RepRow[];
 }) {
-  return (
-    <Tabs defaultValue="laps">
-      <TabsList>
-        <TabsTrigger value="laps">LAPS Performance</TabsTrigger>
-        <TabsTrigger value="pipeline">Open Pipeline</TabsTrigger>
-        <TabsTrigger value="reps">Sales Reps</TabsTrigger>
-      </TabsList>
-
-      <TabsContent value="laps">
-        <LapsPerformance laps={laps} />
-      </TabsContent>
-      <TabsContent value="pipeline">
-        <Pipeline pipeline={pipeline} />
-      </TabsContent>
-      <TabsContent value="reps">
-        <Reps reps={reps} />
-      </TabsContent>
-    </Tabs>
-  );
-}
-
-function LapsPerformance({ laps }: { laps: LapsBundle }) {
-  const [period, setPeriod] = useState<"week" | "month" | "quarter">("week");
-  const data = laps[period];
+  const [tab, setTab] = useState<Tab>("laps");
 
   return (
-    <div className="space-y-4">
-      <div className="inline-flex rounded-lg bg-muted p-1 text-sm">
-        {(["week", "month", "quarter"] as const).map((p) => (
-          <button
-            key={p}
-            onClick={() => setPeriod(p)}
-            className={`rounded-md px-3 py-1 capitalize ${
-              period === p ? "bg-background shadow" : "text-muted-foreground"
-            }`}
-          >
-            {p}ly
-          </button>
+    <div>
+      <div className="seg">
+        {(
+          [
+            ["laps", "LAPS performance"],
+            ["pipeline", "Open pipeline"],
+            ["reps", "Sales reps"],
+          ] as [Tab, string][]
+        ).map(([v, label]) => (
+          <label key={v} className="seg-opt">
+            <input type="radio" name="reportTab" checked={tab === v} onChange={() => setTab(v)} />
+            {label}
+          </label>
         ))}
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">LAPS Throughput ({period}ly)</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ResponsiveContainer width="100%" height={320}>
-            <BarChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="label" fontSize={12} />
-              <YAxis fontSize={12} allowDecimals={false} />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="newLeads" name="Leads" fill="#94a3b8" />
-              <Bar dataKey="apptsBooked" name="Appts" fill="#60a5fa" />
-              <Bar dataKey="proposalsSent" name="Proposals" fill="#fbbf24" />
-              <Bar dataKey="dealsWon" name="Won" fill="#4ade80" />
-            </BarChart>
-          </ResponsiveContainer>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Period</TableHead>
-                <TableHead>Leads</TableHead>
-                <TableHead>Appts Booked</TableHead>
-                <TableHead>Appts Completed</TableHead>
-                <TableHead>Proposals Sent</TableHead>
-                <TableHead>Deals Won</TableHead>
-                <TableHead>Won Value</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.map((r) => (
-                <TableRow key={r.label}>
-                  <TableCell className="font-medium">{r.label}</TableCell>
-                  <TableCell>{r.newLeads}</TableCell>
-                  <TableCell>{r.apptsBooked}</TableCell>
-                  <TableCell>{r.apptsCompleted}</TableCell>
-                  <TableCell>{r.proposalsSent}</TableCell>
-                  <TableCell>{r.dealsWon}</TableCell>
-                  <TableCell>{formatCurrency(r.wonValue)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <div className="mt-6">
+        {tab === "laps" && <LapsPerformance laps={laps} />}
+        {tab === "pipeline" && <Pipeline pipeline={pipeline} />}
+        {tab === "reps" && <Reps reps={reps} />}
+      </div>
     </div>
   );
 }
 
-const STAGE_FILL = ["#94a3b8", "#60a5fa", "#818cf8", "#a78bfa"];
+const SERIES = [
+  { key: "newLeads", label: "Leads", color: "var(--color-text)" },
+  { key: "apptsBooked", label: "Appts", color: "var(--color-neutral-700)" },
+  { key: "proposalsSent", label: "Proposals", color: "var(--color-neutral-400)" },
+  { key: "dealsWon", label: "Won", color: "var(--color-accent)" },
+] as const;
+
+function LapsPerformance({ laps }: { laps: LapsBundle }) {
+  const [period, setPeriod] = useState<"week" | "month" | "quarter">("week");
+  const data = laps[period];
+  const max = Math.max(
+    1,
+    ...data.flatMap((d) => [d.newLeads, d.apptsBooked, d.proposalsSent, d.dealsWon]),
+  );
+
+  return (
+    <div>
+      <div className="seg">
+        {(["week", "month", "quarter"] as const).map((p) => (
+          <label key={p} className="seg-opt capitalize">
+            <input type="radio" name="period" checked={period === p} onChange={() => setPeriod(p)} />
+            {p}ly
+          </label>
+        ))}
+      </div>
+
+      {/* Chart */}
+      <div className="mt-6 border-t-2 border-divider pt-6">
+        <div className="flex items-center justify-between">
+          <MicroLabel>LAPS throughput</MicroLabel>
+          <div className="flex flex-wrap gap-4">
+            {SERIES.map((s) => (
+              <span key={s.key} className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5" style={{ background: s.color }} />
+                <span className="micro-label">{s.label}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-6 flex h-[230px] items-end gap-4 border-b-2 border-divider">
+          {data.map((d) => (
+            <div key={d.label} className="flex flex-1 items-end justify-center gap-[3px]">
+              {SERIES.map((s) => (
+                <div
+                  key={s.key}
+                  className="w-[11px]"
+                  style={{
+                    height: `${((d[s.key as keyof LapsRow] as number) / max) * 200}px`,
+                    background: s.color,
+                  }}
+                  title={`${s.label}: ${d[s.key as keyof LapsRow]}`}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-4 py-3">
+          {data.map((d) => (
+            <div key={d.label} className="flex-1 text-center text-[11px] text-muted">
+              {d.label}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Table */}
+      <table className="table mt-6">
+        <thead>
+          <tr>
+            <th>Period</th>
+            <th className="num">Leads</th>
+            <th className="num">Appts booked</th>
+            <th className="num">Appts completed</th>
+            <th className="num">Proposals sent</th>
+            <th className="num">Deals won</th>
+            <th className="num">Won value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((r) => (
+            <tr key={r.label}>
+              <td className="font-heading font-extrabold">{r.label}</td>
+              <td className="num">{r.newLeads || "—"}</td>
+              <td className="num">{r.apptsBooked || "—"}</td>
+              <td className="num">{r.apptsCompleted || "—"}</td>
+              <td className="num">{r.proposalsSent || "—"}</td>
+              <td className="num">{r.dealsWon || "—"}</td>
+              <td className="num font-semibold">{r.wonValue ? formatCurrency(r.wonValue) : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function Pipeline({
   pipeline,
 }: {
   pipeline: { rows: PipelineStageRow[]; totalCount: number; totalValue: number };
 }) {
-  const chartData = pipeline.rows.map((r) => ({
-    label: PROPOSAL_STATUS_LABELS[r.status as ProposalStatus] ?? r.status,
-    value: r.value,
-    count: r.count,
-  }));
+  const max = Math.max(1, ...pipeline.rows.map((r) => r.value));
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <StatCard label="Open Proposals" value={pipeline.totalCount} />
-        <StatCard label="Open Pipeline Value" value={formatCurrency(pipeline.totalValue)} />
+    <div>
+      <div className="grid grid-cols-2 border-y-2 border-divider">
+        <div className="border-r border-divider px-4 pb-6 pt-4">
+          <div className="micro-label">Open proposals</div>
+          <div className="mt-3 font-heading text-[34px] font-extrabold [font-variant-numeric:tabular-nums]">
+            {pipeline.totalCount}
+          </div>
+        </div>
+        <div className="px-4 pb-6 pt-4">
+          <div className="micro-label">Open pipeline value</div>
+          <div className="mt-3 font-heading text-[34px] font-extrabold [font-variant-numeric:tabular-nums]">
+            {formatCurrency(pipeline.totalValue)}
+          </div>
+        </div>
       </div>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Open Pipeline by Stage</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {chartData.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              No open proposals in the pipeline.
-            </p>
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={chartData} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                <XAxis type="number" fontSize={12} tickFormatter={(v) => formatCurrency(v)} />
-                <YAxis type="category" dataKey="label" fontSize={12} width={80} />
-                <Tooltip formatter={(v: number) => formatCurrency(v)} />
-                <Bar dataKey="value" name="Value">
-                  {chartData.map((_, i) => (
-                    <Cell key={i} fill={STAGE_FILL[i % STAGE_FILL.length]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </CardContent>
-      </Card>
+
+      <div className="mt-8">
+        <MicroLabel>Open pipeline by stage</MicroLabel>
+        {pipeline.rows.length === 0 ? (
+          <p className="mt-3 text-[14px] text-muted">No open proposals in the pipeline.</p>
+        ) : (
+          <div className="mt-4 border-t-2 border-divider">
+            {pipeline.rows.map((r, i) => (
+              <div
+                key={r.status}
+                className="grid grid-cols-[150px_1fr_170px] items-center gap-6 border-b border-divider py-4 max-sm:grid-cols-[110px_1fr]"
+              >
+                <div className="micro-label">
+                  {PROPOSAL_STATUS_LABELS[r.status as ProposalStatus] ?? r.status}
+                </div>
+                <div className="flex items-center gap-3">
+                  <div
+                    className="h-6"
+                    style={{
+                      width: `${Math.max(4, (r.value / max) * 100)}%`,
+                      background: i === 0 ? "var(--color-text)" : "var(--color-neutral-600)",
+                    }}
+                  />
+                  <span className="text-[12px] text-muted">{r.count} deals</span>
+                </div>
+                <div className="text-right font-heading text-[18px] font-extrabold [font-variant-numeric:tabular-nums] max-sm:hidden">
+                  {formatCurrency(r.value)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 function Reps({ reps }: { reps: RepRow[] }) {
-  return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Closed-Won Volume by Rep</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={reps}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="repName" fontSize={12} />
-              <YAxis fontSize={12} tickFormatter={(v) => formatCurrency(v)} />
-              <Tooltip formatter={(v: number) => formatCurrency(v)} />
-              <Bar dataKey="wonValue" name="Won Value" fill="#4ade80" />
-            </BarChart>
-          </ResponsiveContainer>
-        </CardContent>
-      </Card>
+  const max = Math.max(1, ...reps.map((r) => r.wonValue));
 
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Rep</TableHead>
-                <TableHead>Proposals</TableHead>
-                <TableHead>Won</TableHead>
-                <TableHead>Won Value</TableHead>
-                <TableHead>Close Rate</TableHead>
-                <TableHead>Avg Cycle</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {reps.map((r) => (
-                <TableRow key={r.repId}>
-                  <TableCell className="font-medium">{r.repName}</TableCell>
-                  <TableCell>{r.proposalsCount}</TableCell>
-                  <TableCell>{r.wonCount}</TableCell>
-                  <TableCell>{formatCurrency(r.wonValue)}</TableCell>
-                  <TableCell>{(r.closeRate * 100).toFixed(0)}%</TableCell>
-                  <TableCell>
-                    {r.avgCycleDays != null ? `${r.avgCycleDays} days` : "—"}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+  return (
+    <div>
+      <MicroLabel>Closed-won volume by rep</MicroLabel>
+      <div className="mt-4 flex h-[220px] items-end gap-14 border-b-2 border-divider pl-2">
+        {reps.map((r) => (
+          <div key={r.repId} className="flex w-[130px] flex-col items-start justify-end">
+            <div className="mb-2 font-heading text-[14px] font-extrabold [font-variant-numeric:tabular-nums]">
+              {formatCurrency(r.wonValue)}
+            </div>
+            <div
+              className="w-full"
+              style={{ height: `${(r.wonValue / max) * 170}px`, background: "var(--color-text)" }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-14 pl-2 pt-3">
+        {reps.map((r) => (
+          <div key={r.repId} className="w-[130px] text-[12px] text-muted">
+            {r.repName}
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-8">
+        <RepTable reps={reps} />
+      </div>
     </div>
   );
 }

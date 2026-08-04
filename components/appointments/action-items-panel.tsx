@@ -3,10 +3,6 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/utils";
 import { addActionItem, toggleActionItem } from "@/app/(dashboard)/appointments/actions";
 
@@ -54,88 +50,58 @@ export function ActionItemsPanel({
 
   const open = items.filter((i) => !i.done);
   const done = items.filter((i) => i.done);
+  const ordered = [...open, ...done];
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Action Items</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <form onSubmit={add} className="flex flex-wrap items-end gap-2">
-          <Select
-            className="w-56"
-            value={apptId}
-            onChange={(e) => setApptId(e.target.value)}
-          >
-            <option value="">Appointment…</option>
-            {apptOptions.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.title}
-              </option>
-            ))}
-          </Select>
-          <Input
-            className="flex-1"
-            placeholder="Action item…"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-          <Input
-            type="date"
-            className="w-40"
-            value={dueDate}
-            onChange={(e) => setDueDate(e.target.value)}
-          />
-          <Button type="submit" size="sm" disabled={pending || !apptId || !description}>
-            <Plus className="h-4 w-4" />
-            Add
-          </Button>
-        </form>
+    <section className="mt-14">
+      <div className="flex items-baseline justify-between border-b-2 border-divider pb-2">
+        <div className="micro-label">Action items</div>
+        <div className="text-[12px] font-semibold text-accent-700">{open.length} open</div>
+      </div>
 
-        <div className="space-y-1">
-          {open.length === 0 && (
-            <p className="text-sm text-muted-foreground">No open action items.</p>
-          )}
-          {open.map((i) => (
-            <ItemRow key={i.id} item={i} onToggle={toggle} />
+      <form onSubmit={add} className="flex flex-wrap items-center gap-2 border-b border-divider py-3">
+        <select className="input w-[280px] max-w-full" value={apptId} onChange={(e) => setApptId(e.target.value)}>
+          <option value="">Appointment…</option>
+          {apptOptions.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.title}
+            </option>
           ))}
-        </div>
+        </select>
+        <input
+          className="input flex-1"
+          placeholder="Action item…"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+        <input type="date" className="input w-[160px]" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+        <button type="submit" className="btn btn-primary" disabled={pending || !apptId || !description}>
+          <Plus className="h-4 w-4" />
+          Add
+        </button>
+      </form>
 
-        {done.length > 0 && (
-          <div className="space-y-1 border-t pt-3">
-            <p className="text-xs font-medium uppercase text-muted-foreground">Completed</p>
-            {done.map((i) => (
-              <ItemRow key={i.id} item={i} onToggle={toggle} />
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function ItemRow({
-  item,
-  onToggle,
-}: {
-  item: ActionItemRow;
-  onToggle: (id: string, done: boolean) => void;
-}) {
-  return (
-    <label className="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-accent/50">
-      <input
-        type="checkbox"
-        checked={item.done}
-        onChange={(e) => onToggle(item.id, e.target.checked)}
-        className="h-4 w-4"
-      />
-      <span className={item.done ? "text-sm text-muted-foreground line-through" : "text-sm"}>
-        {item.description}
-      </span>
-      <span className="ml-auto text-xs text-muted-foreground">
-        {item.leadName}
-        {item.dueDate ? ` · due ${formatDate(item.dueDate)}` : ""}
-      </span>
-    </label>
+      {ordered.length === 0 && <p className="py-4 text-[14px] text-muted">No open action items.</p>}
+      {ordered.map((i) => (
+        <label
+          key={i.id}
+          className="grid grid-cols-[18px_1fr_auto] items-center gap-3 border-b border-divider py-3"
+        >
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            checked={i.done}
+            onChange={(e) => toggle(i.id, e.target.checked)}
+          />
+          <span className={i.done ? "text-[15px] text-neutral-700 line-through" : "text-[15px]"}>
+            {i.description}
+          </span>
+          <span className="text-right text-[12px] text-muted">
+            {i.leadName}
+            {i.dueDate ? ` · due ${formatDate(i.dueDate)}` : ""}
+          </span>
+        </label>
+      ))}
+    </section>
   );
 }

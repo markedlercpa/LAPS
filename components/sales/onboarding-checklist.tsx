@@ -21,27 +21,24 @@ export function OnboardingChecklist({ items }: { items: ChecklistRow[] }) {
     });
 
   return (
-    <ul className="space-y-1">
+    <div>
       {items.map((item) => (
-        <li key={item.id}>
-          <label className="flex items-center gap-2.5 rounded-md px-2 py-1 hover:bg-accent/50">
-            <input
-              type="checkbox"
-              checked={item.done}
-              disabled={pending}
-              onChange={(e) => toggle(item.id, e.target.checked)}
-              className="h-4 w-4"
-            />
-            <span
-              className={
-                item.done ? "text-sm text-muted-foreground line-through" : "text-sm"
-              }
-            >
-              {item.label}
-            </span>
-          </label>
-        </li>
+        <label
+          key={item.id}
+          className="grid grid-cols-[18px_1fr] items-center gap-3 border-b border-divider py-2.5 last:border-b-0"
+        >
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            checked={item.done}
+            disabled={pending}
+            onChange={(e) => toggle(item.id, e.target.checked)}
+          />
+          <span className={item.done ? "text-[14px] text-neutral-700 line-through" : "text-[14px]"}>
+            {item.label}
+          </span>
+        </label>
       ))}
-    </ul>
+    </div>
   );
 }

@@ -20,12 +20,13 @@ export const STAGE_LABELS: Record<Stage, string> = {
   CLOSED_LOST: "Closed Lost",
 };
 
+// Modernist mono palette has no blue/amber/green — map stages to tag classes.
 export const STAGE_COLORS: Record<Stage, string> = {
-  NEW: "bg-slate-100 text-slate-700",
-  APPOINTMENT: "bg-blue-100 text-blue-700",
-  PROPOSAL: "bg-amber-100 text-amber-700",
-  CLOSED_WON: "bg-green-100 text-green-700",
-  CLOSED_LOST: "bg-red-100 text-red-700",
+  NEW: "tag-neutral",
+  APPOINTMENT: "tag-neutral",
+  PROPOSAL: "tag-outline",
+  CLOSED_WON: "tag-accent",
+  CLOSED_LOST: "tag-neutral",
 };
 
 export const PROPOSAL_STATUS_LABELS: Record<ProposalStatus, string> = {
@@ -38,12 +39,12 @@ export const PROPOSAL_STATUS_LABELS: Record<ProposalStatus, string> = {
 };
 
 export const PROPOSAL_STATUS_COLORS: Record<ProposalStatus, string> = {
-  DRAFT: "bg-slate-100 text-slate-700",
-  SENT: "bg-blue-100 text-blue-700",
-  VIEWED: "bg-indigo-100 text-indigo-700",
-  SIGNED: "bg-purple-100 text-purple-700",
-  WON: "bg-green-100 text-green-700",
-  LOST: "bg-red-100 text-red-700",
+  DRAFT: "tag-neutral",
+  SENT: "tag-outline",
+  VIEWED: "tag-outline",
+  SIGNED: "tag-outline",
+  WON: "tag-accent",
+  LOST: "tag-neutral",
 };
 
 export const APPOINTMENT_STATUS_LABELS: Record<AppointmentStatus, string> = {
@@ -54,10 +55,10 @@ export const APPOINTMENT_STATUS_LABELS: Record<AppointmentStatus, string> = {
 };
 
 export const APPOINTMENT_STATUS_COLORS: Record<AppointmentStatus, string> = {
-  BOOKED: "bg-blue-100 text-blue-700",
-  COMPLETED: "bg-green-100 text-green-700",
-  NO_SHOW: "bg-red-100 text-red-700",
-  CANCELED: "bg-slate-100 text-slate-700",
+  BOOKED: "tag-outline",
+  COMPLETED: "tag-neutral",
+  NO_SHOW: "tag-accent",
+  CANCELED: "tag-neutral",
 };
 
 // Onboarding checklist template seeded onto each new client handoff.

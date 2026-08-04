@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Mail, Phone, Building2, Tag } from "lucide-react";
+import { ArrowLeft, Building2 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { StageBadge } from "@/components/status-badge";
+import { MicroLabel } from "@/components/micro-label";
 import { LeadActivityPanel } from "@/components/leads/lead-activity-panel";
 import { LeadStageSelect } from "@/components/leads/lead-stage-select";
 import { EditLeadButton } from "@/components/leads/edit-lead-button";
@@ -45,22 +44,29 @@ export default async function LeadDetailPage({
     userName: a.user?.name ?? a.user?.email ?? "System",
   }));
 
+  const details: [string, React.ReactNode][] = [
+    ["Stage", <StageBadge key="s" stage={lead.stage} />],
+    ["Email", lead.email ?? "—"],
+    ["Phone", lead.phone ?? "—"],
+    ["Source", lead.leadSource ?? "—"],
+    ["Owner", lead.owner?.name ?? lead.owner?.email ?? "Unassigned"],
+    ["Created", formatDate(lead.createdAt)],
+  ];
+
   return (
     <div>
-      <Link href="/leads">
-        <Button variant="ghost" size="sm" className="mb-4 -ml-2">
-          <ArrowLeft className="h-4 w-4" />
-          Back to leads
-        </Button>
+      <Link href="/leads" className="btn btn-ghost mb-4 -ml-1">
+        <ArrowLeft className="h-4 w-4" />
+        Back to leads
       </Link>
 
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">
+          <h1 className="mb-1">
             {lead.firstName} {lead.lastName}
           </h1>
           {lead.companyName && (
-            <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+            <p className="mb-0 flex items-center gap-1.5 text-muted">
               <Building2 className="h-4 w-4" />
               {lead.companyName}
             </p>
@@ -83,115 +89,59 @@ export default async function LeadDetailPage({
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Left: details */}
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Details</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <Detail icon={<StageBadge stage={lead.stage} />} label="Stage" />
-              <Detail
-                icon={<Mail className="h-4 w-4 text-muted-foreground" />}
-                label={lead.email ?? "—"}
-              />
-              <Detail
-                icon={<Phone className="h-4 w-4 text-muted-foreground" />}
-                label={lead.phone ?? "—"}
-              />
-              <Detail
-                icon={<Tag className="h-4 w-4 text-muted-foreground" />}
-                label={lead.leadSource ?? "—"}
-              />
-              <div className="border-t pt-3 text-xs text-muted-foreground">
-                Owner: {lead.owner?.name ?? lead.owner?.email ?? "Unassigned"}
-                <br />
-                Created: {formatDate(lead.createdAt)}
+      <div className="grid grid-cols-[330px_1fr] border-t-2 border-divider max-lg:grid-cols-1">
+        {/* Left column */}
+        <div className="border-r border-divider py-6 pr-8 max-lg:border-r-0 max-lg:pr-0">
+          <MicroLabel>Details</MicroLabel>
+          <dl className="mb-6 mt-2">
+            {details.map(([k, v]) => (
+              <div key={k} className="grid grid-cols-[88px_1fr] gap-2 border-b border-divider py-2.5">
+                <dt className="micro-label">{k}</dt>
+                <dd className="m-0 text-[13px]">{v}</dd>
               </div>
-              {lead.notes && (
-                <div className="border-t pt-3">
-                  <div className="mb-1 text-xs font-medium uppercase text-muted-foreground">
-                    Notes
-                  </div>
-                  <p className="whitespace-pre-wrap text-sm">{lead.notes}</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+            ))}
+          </dl>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Related</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div>
-                <div className="mb-1 text-xs font-medium uppercase text-muted-foreground">
-                  Appointments ({lead.appointments.length})
+          <MicroLabel>Related</MicroLabel>
+          <div className="mt-2 text-[13px]">
+            <div className="mb-1 mt-2 text-[11px] font-semibold uppercase tracking-[.08em] text-neutral-600">
+              Appointments ({lead.appointments.length})
+            </div>
+            {lead.appointments.length === 0 ? (
+              <p className="mb-0 text-muted">None</p>
+            ) : (
+              lead.appointments.map((a) => (
+                <div key={a.id} className="flex justify-between border-b border-divider py-1.5">
+                  <span>{formatDate(a.scheduledAt)}</span>
+                  <span className="text-muted">{APPOINTMENT_STATUS_LABELS[a.status]}</span>
                 </div>
-                {lead.appointments.length === 0 ? (
-                  <p className="text-muted-foreground">None</p>
-                ) : (
-                  lead.appointments.map((a) => (
-                    <div key={a.id} className="flex justify-between">
-                      <span>{formatDate(a.scheduledAt)}</span>
-                      <span className="text-muted-foreground">
-                        {APPOINTMENT_STATUS_LABELS[a.status]}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-              <div className="border-t pt-3">
-                <div className="mb-1 text-xs font-medium uppercase text-muted-foreground">
-                  Proposals ({lead.proposals.length})
-                </div>
-                {lead.proposals.length === 0 ? (
-                  <p className="text-muted-foreground">None</p>
-                ) : (
-                  lead.proposals.map((p) => (
-                    <Link
-                      key={p.id}
-                      href={`/proposals/${p.id}`}
-                      className="flex justify-between hover:underline"
-                    >
-                      <span className="truncate">{p.title}</span>
-                      <span className="text-muted-foreground">
-                        {PROPOSAL_STATUS_LABELS[p.status]}
-                      </span>
-                    </Link>
-                  ))
-                )}
-              </div>
-            </CardContent>
-          </Card>
+              ))
+            )}
+            <div className="mb-1 mt-4 text-[11px] font-semibold uppercase tracking-[.08em] text-neutral-600">
+              Proposals ({lead.proposals.length})
+            </div>
+            {lead.proposals.length === 0 ? (
+              <p className="mb-0 text-muted">None</p>
+            ) : (
+              lead.proposals.map((p) => (
+                <Link
+                  key={p.id}
+                  href={`/proposals/${p.id}`}
+                  className="flex justify-between border-b border-divider py-1.5 text-accent-700 no-underline"
+                >
+                  <span className="truncate">{p.title}</span>
+                  <span>{PROPOSAL_STATUS_LABELS[p.status]}</span>
+                </Link>
+              ))
+            )}
+          </div>
         </div>
 
-        {/* Right: activity */}
-        <div className="lg:col-span-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Interactions</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <LeadActivityPanel
-                leadId={lead.id}
-                leadEmail={lead.email}
-                activities={activities}
-              />
-            </CardContent>
-          </Card>
+        {/* Right column */}
+        <div className="py-6 pl-8 max-lg:pl-0">
+          <LeadActivityPanel leadId={lead.id} leadEmail={lead.email} activities={activities} />
         </div>
       </div>
-    </div>
-  );
-}
-
-function Detail({ icon, label }: { icon: React.ReactNode; label: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      {icon}
-      <span>{label}</span>
     </div>
   );
 }

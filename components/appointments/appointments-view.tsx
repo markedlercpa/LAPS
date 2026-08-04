@@ -9,7 +9,7 @@ import { formatDateTime } from "@/lib/utils";
 
 const AppointmentCalendar = dynamic(
   () => import("@/components/appointments/appointment-calendar"),
-  { ssr: false, loading: () => <p className="text-sm text-muted-foreground">Loading calendar…</p> },
+  { ssr: false, loading: () => <p className="text-[14px] text-muted">Loading calendar…</p> },
 );
 
 export type ApptRow = {
@@ -25,19 +25,30 @@ export type ApptRow = {
 
 export function AppointmentsView({ rows }: { rows: ApptRow[] }) {
   const columns: Column<ApptRow>[] = [
-    { key: "title", header: "Title", sortable: true, render: (r) => <span className="font-medium">{r.title}</span> },
-    { key: "leadName", header: "Lead", sortable: true },
+    {
+      key: "title",
+      header: "Title",
+      sortable: true,
+      render: (r) => <span className="font-heading font-extrabold">{r.title}</span>,
+    },
+    { key: "leadName", header: "Lead", sortable: true, render: (r) => <span className="text-muted">{r.leadName}</span> },
     {
       key: "scheduledAt",
       header: "When",
       sortable: true,
+      className: "whitespace-nowrap [font-variant-numeric:tabular-nums]",
       render: (r) => formatDateTime(r.scheduledAt),
     },
-    { key: "ownerName", header: "Owner" },
+    { key: "ownerName", header: "Owner", render: (r) => <span className="text-muted">{r.ownerName}</span> },
     {
       key: "status",
       header: "Status",
-      render: (r) => <AppointmentStatusSelect id={r.id} status={r.status} />,
+      numeric: true,
+      render: (r) => (
+        <div className="flex justify-end">
+          <AppointmentStatusSelect id={r.id} status={r.status} />
+        </div>
+      ),
     },
   ];
 
@@ -54,6 +65,7 @@ export function AppointmentsView({ rows }: { rows: ApptRow[] }) {
           searchKeys={["title", "leadName"]}
           rowHref={(r) => `/leads/${r.leadId}`}
           emptyMessage="No appointments yet."
+          searchPlaceholder="Search appointments"
         />
       </TabsContent>
       <TabsContent value="calendar">

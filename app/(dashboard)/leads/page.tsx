@@ -1,16 +1,28 @@
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
-import { StatCard } from "@/components/stat-card";
+import { MetricRow } from "@/components/metric-row";
+import { SegToggle } from "@/components/ui/seg";
 import { LeadsTable, type LeadRow } from "@/components/leads/leads-table";
+import { LeadsBoard, type BoardLead } from "@/components/leads/leads-board";
 import { NewLeadButton } from "@/components/leads/new-lead-button";
 
 export const dynamic = "force-dynamic";
 
-export default async function LeadsPage() {
+export default async function LeadsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ view?: string }>;
+}) {
+  const { view } = await searchParams;
+  const isBoard = view === "board";
+
   const leads = await prisma.lead.findMany({
     orderBy: { createdAt: "desc" },
     include: { owner: { select: { name: true, email: true } } },
   });
+
+  const ownerName = (o: { name: string | null; email: string } | null) =>
+    o?.name ?? o?.email ?? "Unassigned";
 
   const rows: LeadRow[] = leads.map((l) => ({
     id: l.id,
@@ -21,8 +33,18 @@ export default async function LeadsPage() {
     email: l.email,
     phone: l.phone,
     stage: l.stage,
-    ownerName: l.owner?.name ?? l.owner?.email ?? "Unassigned",
+    ownerName: ownerName(l.owner),
     createdAt: l.createdAt.toISOString(),
+  }));
+
+  const boardLeads: BoardLead[] = leads.map((l) => ({
+    id: l.id,
+    stage: l.stage,
+    firstName: l.firstName,
+    lastName: l.lastName,
+    companyName: l.companyName,
+    leadSource: l.leadSource,
+    ownerName: ownerName(l.owner),
   }));
 
   const activeCount = leads.filter(
@@ -32,22 +54,45 @@ export default async function LeadsPage() {
     (l) => l.createdAt.getTime() > Date.now() - 7 * 86_400_000,
   ).length;
 
+  const seg = (
+    <SegToggle
+      param="view"
+      defaultValue="table"
+      options={[
+        { value: "table", label: "Table" },
+        { value: "board", label: "Board" },
+      ]}
+    />
+  );
+
   return (
     <div>
       <PageHeader
+        eyebrow="01 — L"
         title="Lead Generation"
         description="All leads and their interaction history."
       >
         <NewLeadButton />
       </PageHeader>
 
-      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
-        <StatCard label="Total Leads" value={leads.length} />
-        <StatCard label="Active (open)" value={activeCount} />
-        <StatCard label="New this week" value={newThisWeek} />
-      </div>
+      <MetricRow
+        metrics={[
+          { label: "Total leads", value: leads.length },
+          { label: "Active (open)", value: activeCount },
+          { label: "New this week", value: newThisWeek },
+        ]}
+      />
 
-      <LeadsTable rows={rows} />
+      <div className="mt-8">
+        {isBoard ? (
+          <>
+            <div className="mb-4">{seg}</div>
+            <LeadsBoard leads={boardLeads} />
+          </>
+        ) : (
+          <LeadsTable rows={rows} toolbarLeft={seg} />
+        )}
+      </div>
     </div>
   );
 }

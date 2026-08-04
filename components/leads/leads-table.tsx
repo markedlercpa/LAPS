@@ -18,30 +18,37 @@ export type LeadRow = {
   createdAt: string;
 };
 
-export function LeadsTable({ rows }: { rows: LeadRow[] }) {
+export function LeadsTable({
+  rows,
+  toolbarLeft,
+}: {
+  rows: LeadRow[];
+  toolbarLeft?: React.ReactNode;
+}) {
   const columns: Column<LeadRow>[] = [
     {
       key: "name",
       header: "Name",
       sortable: true,
+      className: "whitespace-nowrap",
       sortValue: (r) => `${r.lastName} ${r.firstName}`.toLowerCase(),
       render: (r) => (
-        <span className="font-medium">
+        <span className="font-heading font-extrabold">
           {r.firstName} {r.lastName}
         </span>
       ),
     },
     { key: "companyName", header: "Company", sortable: true, render: (r) => r.companyName || "—" },
-    { key: "leadSource", header: "Source", render: (r) => r.leadSource || "—" },
-    { key: "email", header: "Email", render: (r) => r.email || "—" },
-    { key: "phone", header: "Phone", render: (r) => r.phone || "—" },
-    { key: "ownerName", header: "Owner", sortable: true },
+    { key: "leadSource", header: "Source", render: (r) => <span className="text-muted">{r.leadSource || "—"}</span> },
+    { key: "email", header: "Email", render: (r) => <span className="text-muted">{r.email || "—"}</span> },
+    { key: "ownerName", header: "Owner", sortable: true, render: (r) => <span className="text-muted">{r.ownerName}</span> },
     { key: "stage", header: "Stage", render: (r) => <StageBadge stage={r.stage} /> },
     {
       key: "createdAt",
       header: "Created",
       sortable: true,
-      render: (r) => formatDate(r.createdAt),
+      numeric: true,
+      render: (r) => <span className="text-muted">{formatDate(r.createdAt)}</span>,
     },
   ];
 
@@ -52,6 +59,8 @@ export function LeadsTable({ rows }: { rows: LeadRow[] }) {
       searchKeys={["firstName", "lastName", "companyName", "email"]}
       rowHref={(r) => `/leads/${r.id}`}
       emptyMessage="No leads yet. Add your first lead to get started."
+      toolbarLeft={toolbarLeft}
+      searchPlaceholder="Search leads"
     />
   );
 }

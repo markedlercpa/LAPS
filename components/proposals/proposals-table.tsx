@@ -25,28 +25,41 @@ export function ProposalsTable({
   emptyMessage?: string;
 }) {
   const columns: Column<ProposalRow>[] = [
-    { key: "title", header: "Proposal", sortable: true, render: (r) => <span className="font-medium">{r.title}</span> },
-    { key: "leadName", header: "Client", sortable: true },
+    {
+      key: "title",
+      header: "Proposal",
+      sortable: true,
+      render: (r) => <span className="font-heading font-extrabold">{r.title}</span>,
+    },
+    { key: "leadName", header: "Client", sortable: true, render: (r) => <span className="text-muted">{r.leadName}</span> },
     {
       key: "contractValue",
       header: "Value",
       sortable: true,
-      render: (r) => formatCurrency(r.contractValue),
+      numeric: true,
+      render: (r) => <span className="font-semibold">{formatCurrency(r.contractValue)}</span>,
     },
     {
       key: "margin",
-      header: "Est. Margin",
+      header: "Est. margin",
       sortable: true,
+      numeric: true,
       sortValue: (r) => r.marginPct,
       render: (r) => (
-        <span className={r.marginPct < 40 ? "text-amber-600" : "text-green-700"}>
+        <span className={r.marginPct < 40 ? "text-accent-700" : "text-ink"}>
           {formatCurrency(r.margin)} ({r.marginPct.toFixed(0)}%)
         </span>
       ),
     },
-    { key: "ownerName", header: "Owner" },
+    { key: "ownerName", header: "Owner", render: (r) => <span className="text-muted">{r.ownerName}</span> },
     { key: "status", header: "Status", render: (r) => <ProposalStatusBadge status={r.status} /> },
-    { key: "createdAt", header: "Created", sortable: true, render: (r) => formatDate(r.createdAt) },
+    {
+      key: "createdAt",
+      header: "Created",
+      sortable: true,
+      numeric: true,
+      render: (r) => <span className="text-muted">{formatDate(r.createdAt)}</span>,
+    },
   ];
 
   return (
@@ -56,6 +69,7 @@ export function ProposalsTable({
       searchKeys={["title", "leadName"]}
       rowHref={(r) => `/proposals/${r.id}`}
       emptyMessage={emptyMessage ?? "No proposals yet."}
+      searchPlaceholder="Search proposals"
     />
   );
 }

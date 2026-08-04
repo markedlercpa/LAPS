@@ -1,5 +1,13 @@
 import type { Metadata } from "next";
+import { Archivo } from "next/font/google";
 import "./globals.css";
+
+const archivo = Archivo({
+  subsets: ["latin"],
+  weight: ["400", "600", "800"],
+  variable: "--font-archivo",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "LAPS — Sales Cycle Management",
@@ -13,8 +21,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className="min-h-screen bg-background antialiased">{children}</body>
+    <html lang="en" className={archivo.variable}>
+      <body className="min-h-screen antialiased">{children}</body>
     </html>
   );
 }
