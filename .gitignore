@@ -33,3 +33,6 @@ yarn-error.log*
 # prisma
 /prisma/dev.db
 /prisma/dev.db-journal
+
+# HubSpot export data (never commit customer PII)
+/hubspot-export/
