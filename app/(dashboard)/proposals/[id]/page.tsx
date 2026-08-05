@@ -8,8 +8,7 @@ import { getScopingView } from "@/lib/scoping";
 import { listDemos } from "@/lib/demos";
 import { Button } from "@/components/ui/button";
 import { ProposalStatusBadge } from "@/components/status-badge";
-import { ProposalEditor } from "@/components/proposals/proposal-editor";
-import { ScopingCard } from "@/components/proposals/scoping-card";
+import { ProposalWorkspace } from "@/components/proposals/proposal-workspace";
 import { formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -88,55 +87,61 @@ export default async function ProposalDetailPage({
         </div>
       </div>
 
-      <div className="mb-6">
-        <ScopingCard
-          proposalId={proposal.id}
-          locked={locked}
-          scoping={{
+      <ProposalWorkspace
+        scoped={scoped}
+        hasDemo={Boolean(proposal.demoKey)}
+        scopingProps={{
+          proposalId: proposal.id,
+          locked,
+          scoping: {
             lines: scoping.lines,
             markupEnabled: scoping.markupEnabled,
             markupPct: scoping.markupPct,
-          }}
-        />
-      </div>
-
-      <ProposalEditor
-        shareUrl={shareUrl}
-        stripeEnabled={stripeConfigured()}
-        scoped={scoped}
-        demoKey={proposal.demoKey}
-        demos={demoOptions}
-        templates={templates}
-        snippets={snippets}
-        proposal={{
-          id: proposal.id,
-          status: proposal.status,
-          estimatedDeliveryCost: Number(proposal.estimatedDeliveryCost),
-          coverLetter: proposal.coverLetter,
-          scopeNarrative: proposal.scopeNarrative,
-          termsText: proposal.termsText,
-          paymentScheduleType: proposal.paymentScheduleType,
-          recurringInterval: proposal.recurringInterval,
-          sentAt: proposal.sentAt?.toISOString() ?? null,
-          viewedAt: proposal.viewedAt?.toISOString() ?? null,
-          signedAt: proposal.signedAt?.toISOString() ?? null,
-          signerName: proposal.signerName,
-          paymentStatus: proposal.paymentStatus,
-          amountPaid: proposal.amountPaid != null ? Number(proposal.amountPaid) : null,
-          paidAt: proposal.paidAt?.toISOString() ?? null,
-          leadHasEmail: Boolean(proposal.lead.email),
-          lineItems: proposal.lineItems.map((li) => ({
-            id: li.id,
-            description: li.description,
-            quantity: Number(li.quantity),
-            unitPrice: Number(li.unitPrice),
-          })),
-          payments: proposal.payments.map((p) => ({
-            id: p.id,
-            description: p.description,
-            amount: Number(p.amount),
-            dueOn: p.dueOn,
-          })),
+          },
+        }}
+        demoProps={{
+          proposalId: proposal.id,
+          locked,
+          demoKey: proposal.demoKey,
+          demos: demoOptions,
+        }}
+        editorProps={{
+          shareUrl,
+          stripeEnabled: stripeConfigured(),
+          scoped,
+          demoKey: proposal.demoKey,
+          templates,
+          snippets,
+          proposal: {
+            id: proposal.id,
+            status: proposal.status,
+            estimatedDeliveryCost: Number(proposal.estimatedDeliveryCost),
+            coverLetter: proposal.coverLetter,
+            scopeNarrative: proposal.scopeNarrative,
+            termsText: proposal.termsText,
+            paymentScheduleType: proposal.paymentScheduleType,
+            recurringInterval: proposal.recurringInterval,
+            sentAt: proposal.sentAt?.toISOString() ?? null,
+            viewedAt: proposal.viewedAt?.toISOString() ?? null,
+            signedAt: proposal.signedAt?.toISOString() ?? null,
+            signerName: proposal.signerName,
+            paymentStatus: proposal.paymentStatus,
+            amountPaid: proposal.amountPaid != null ? Number(proposal.amountPaid) : null,
+            paidAt: proposal.paidAt?.toISOString() ?? null,
+            leadHasEmail: Boolean(proposal.lead.email),
+            lineItems: proposal.lineItems.map((li) => ({
+              id: li.id,
+              description: li.description,
+              quantity: Number(li.quantity),
+              unitPrice: Number(li.unitPrice),
+            })),
+            payments: proposal.payments.map((p) => ({
+              id: p.id,
+              description: p.description,
+              amount: Number(p.amount),
+              dueOn: p.dueOn,
+            })),
+          },
         }}
       />
     </div>

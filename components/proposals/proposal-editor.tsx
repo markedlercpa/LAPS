@@ -22,14 +22,12 @@ import {
   sendProposal,
   setProposalStatus,
   applyTemplate,
-  updateDemo,
 } from "@/app/(dashboard)/proposals/actions";
 
 type LineItem = { id: string; description: string; quantity: number; unitPrice: number };
 type Payment = { id: string; description: string; amount: number; dueOn: string | null };
 type TemplateOption = { key: string; name: string; description: string | null };
 type SnippetOption = { type: SnippetType; name: string; body: string };
-type DemoOption = { key: string; name: string; serviceLine: string };
 
 const SCHEDULE_TYPES: { value: PaymentScheduleType; label: string }[] = [
   { value: "ONE_TIME", label: "One-time payment" },
@@ -44,7 +42,6 @@ export function ProposalEditor({
   stripeEnabled,
   scoped,
   demoKey,
-  demos,
   templates,
   snippets,
 }: {
@@ -72,7 +69,6 @@ export function ProposalEditor({
   stripeEnabled: boolean;
   scoped: boolean;
   demoKey: string | null;
-  demos: DemoOption[];
   templates: TemplateOption[];
   snippets: SnippetOption[];
 }) {
@@ -135,15 +131,6 @@ export function ProposalEditor({
       : missingLineItems
         ? "Add at least one line item to send."
         : null;
-
-  const changeDemo = (key: string) => {
-    setMsg(null);
-    startTransition(async () => {
-      const res = await updateDemo(proposal.id, key);
-      if (!res.ok) setMsg("Failed to attach demo");
-      else router.refresh();
-    });
-  };
 
   const saveDelivery = () =>
     startTransition(async () => {
@@ -303,47 +290,6 @@ export function ProposalEditor({
             </p>
           </div>
         )}
-
-        {/* Sample deliverable (demo) — required before sending */}
-        <div
-          className={cn(
-            "mb-6 border-2 p-3",
-            hasDemo ? "border-divider" : "border-accent",
-          )}
-        >
-          <div className="flex flex-wrap items-end justify-between gap-2">
-            <div className="field flex-1">
-              <label>Sample deliverable (shown to the client)</label>
-              <select
-                className="input"
-                value={demoKey ?? ""}
-                disabled={locked || pending}
-                onChange={(e) => changeDemo(e.target.value)}
-              >
-                <option value="">— none (required to send) —</option>
-                {demos.map((d) => (
-                  <option key={d.key} value={d.key}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {demoKey && (
-              <a
-                className="btn btn-secondary"
-                href={`/demos/${demoKey}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Preview
-              </a>
-            )}
-          </div>
-          <p className="mt-2 text-[12px] text-muted">
-            Every proposal must show an anonymized sample of our work. Auto-attached from the
-            template by service line; change it here if needed.
-          </p>
-        </div>
 
         {/* Document content */}
         <div className="flex items-center justify-between">

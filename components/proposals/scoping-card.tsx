@@ -22,10 +22,12 @@ export function ScopingCard({
   proposalId,
   locked,
   scoping,
+  onSaved,
 }: {
   proposalId: string;
   locked: boolean;
   scoping: { lines: Line[]; markupEnabled: boolean; markupPct: number };
+  onSaved?: (scoped: boolean) => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -65,6 +67,7 @@ export function ScopingCard({
       }
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
+      onSaved?.(c.budgetCost > 0);
       router.refresh();
     });
   };
