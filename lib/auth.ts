@@ -53,6 +53,10 @@ export const authConfig: NextAuthConfig = {
   pages: { signIn: "/signin" },
   // Required when self-hosting behind a proxy (non-Vercel deploys).
   trustHost: true,
+  // Env-gated: set AUTH_DEBUG=true in the host to surface the exact cause of
+  // OAuth callback failures (the reason is only logged at debug level). Leave
+  // unset in normal production operation.
+  debug: process.env.AUTH_DEBUG === "true",
   providers,
   callbacks: {
     async jwt({ token, user }) {
