@@ -443,3 +443,120 @@ model ChecklistItem {
 
   @@index([handoffId])
 }
+
+// ============================================================================
+// ECHO — trust & authority content engine (Phase 1: Evidence + Calling Cards)
+// Evidence -> Calling Cards -> (Housed Content -> Optics) -> LAPS handoff.
+// ============================================================================
+
+// Shared taxonomy across ECHO + LAPS + Quality of Exit — the eight QoO pillars.
+enum QoOPillar {
+  EARNINGS
+  CASH_FLOW
+  REPORTING
+  GROWTH
+  TAXATION
+  CAPITAL
+  LIFESTYLE
+  VALUATION
+}
+
+enum EvidenceType {
+  PAIN_POINT
+  OBJECTION
+  MYTH
+  PRIZE_STATE
+  CLIENT_STORY
+  METHODOLOGY
+  QUOTE
+  DATA_POINT
+}
+
+enum EvidenceSource {
+  SALES_CALL
+  CLIENT_ENGAGEMENT
+  FIREFLIES_TRANSCRIPT
+  EMAIL
+  MANUAL
+}
+
+enum Consent {
+  INTERNAL_ONLY
+  ANONYMIZED
+  PUBLIC
+}
+
+enum CardCategory {
+  HOOK
+  REFRAME
+  MANTRA
+  OBJECTION_KILL
+  PRIZE_FRAME
+  MECHANISM_NAME
+}
+
+enum CardStatus {
+  CANDIDATE
+  ACTIVE
+  RETIRED
+}
+
+// E — Evidence: the vault. Real, resonant material from calls/engagements.
+model EvidenceRecord {
+  id         String         @id @default(cuid())
+  type       EvidenceType
+  source     EvidenceSource @default(MANUAL)
+  sourceRef  String?
+  rawText    String         @db.Text
+  distilled  String?        @db.Text
+  clientRef  String? // internal only — never published
+  consent    Consent        @default(INTERNAL_ONLY)
+  pillarTags QoOPillar[]
+  icpFit     Boolean        @default(false)
+  icpNotes   String?
+  strength   Int            @default(3) // 1-5, how vivid/provable
+  usedCount  Int            @default(0)
+  lastUsedAt DateTime?
+  createdAt  DateTime       @default(now())
+
+  cards CallingCard[] @relation("CardEvidence")
+
+  @@index([type])
+  @@index([source])
+}
+
+// Named frameworks (QoO pillars, Quality of Exit, deal cases) — versioned markdown.
+model MethodologyDoc {
+  id         String      @id @default(cuid())
+  slug       String      @unique
+  name       String
+  version    Int         @default(1)
+  body       String      @db.Text
+  pillarTags QoOPillar[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+}
+
+// C — Calling Cards: the repeatable, ownable language bank.
+model CallingCard {
+  id               String       @id @default(cuid())
+  cardText         String       @db.Text
+  category         CardCategory
+  pillarTags       QoOPillar[]
+  status           CardStatus   @default(CANDIDATE)
+  usageCount       Int          @default(0)
+  performanceIndex Float        @default(0)
+  createdAt        DateTime     @default(now())
+
+  evidence EvidenceRecord[] @relation("CardEvidence")
+
+  @@index([status])
+}
+
+// Hard guardrail: phrases that fail draft/card validation on sight.
+model BannedPhrase {
+  id        String   @id @default(cuid())
+  phrase    String   @unique
+  reason    String?
+  createdAt DateTime @default(now())
+}
