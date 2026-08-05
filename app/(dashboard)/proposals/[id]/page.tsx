@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { stripeConfigured } from "@/lib/stripe";
+import { ensureProposalTemplatesSeeded } from "@/lib/proposal-templates";
 import { Button } from "@/components/ui/button";
 import { ProposalStatusBadge } from "@/components/status-badge";
 import { ProposalEditor } from "@/components/proposals/proposal-editor";
@@ -16,6 +17,17 @@ export default async function ProposalDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  await ensureProposalTemplatesSeeded();
+  const [templates, snippets] = await Promise.all([
+    prisma.proposalTemplate.findMany({
+      orderBy: { sortOrder: "asc" },
+      select: { key: true, name: true, description: true },
+    }),
+    prisma.sectionSnippet.findMany({
+      orderBy: { sortOrder: "asc" },
+      select: { type: true, name: true, body: true },
+    }),
+  ]);
   const proposal = await prisma.proposal.findUnique({
     where: { id },
     include: {
@@ -67,6 +79,8 @@ export default async function ProposalDetailPage({
       <ProposalEditor
         shareUrl={shareUrl}
         stripeEnabled={stripeConfigured()}
+        templates={templates}
+        snippets={snippets}
         proposal={{
           id: proposal.id,
           status: proposal.status,

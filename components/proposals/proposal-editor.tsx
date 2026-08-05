@@ -3,7 +3,12 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Send, Copy, Check } from "lucide-react";
-import type { ProposalStatus, PaymentScheduleType, PaymentStatus } from "@prisma/client";
+import type {
+  ProposalStatus,
+  PaymentScheduleType,
+  PaymentStatus,
+  SnippetType,
+} from "@prisma/client";
 import { MicroLabel } from "@/components/micro-label";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
 import {
@@ -16,10 +21,13 @@ import {
   deletePayment,
   sendProposal,
   setProposalStatus,
+  applyTemplate,
 } from "@/app/(dashboard)/proposals/actions";
 
 type LineItem = { id: string; description: string; quantity: number; unitPrice: number };
 type Payment = { id: string; description: string; amount: number; dueOn: string | null };
+type TemplateOption = { key: string; name: string; description: string | null };
+type SnippetOption = { type: SnippetType; name: string; body: string };
 
 const SCHEDULE_TYPES: { value: PaymentScheduleType; label: string }[] = [
   { value: "ONE_TIME", label: "One-time payment" },
@@ -32,6 +40,8 @@ export function ProposalEditor({
   proposal,
   shareUrl,
   stripeEnabled,
+  templates,
+  snippets,
 }: {
   proposal: {
     id: string;
@@ -55,6 +65,8 @@ export function ProposalEditor({
   };
   shareUrl: string | null;
   stripeEnabled: boolean;
+  templates: TemplateOption[];
+  snippets: SnippetOption[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -108,6 +120,21 @@ export function ProposalEditor({
       setTimeout(() => setContentSaved(false), 1500);
       router.refresh();
     });
+
+  const applyFullTemplate = (key: string) => {
+    if (!key) return;
+    setMsg(null);
+    startTransition(async () => {
+      const res = await applyTemplate(proposal.id, key);
+      if (!res.ok) setMsg(res.error ?? "Failed to apply template");
+      else router.refresh();
+    });
+  };
+
+  // Snippet inserts fill a single section textarea client-side; Save content persists.
+  const coverSnippets = snippets.filter((s) => s.type === "COVER");
+  const scopeSnippets = snippets.filter((s) => s.type === "SCOPE");
+  const termsSnippets = snippets.filter((s) => s.type === "TERMS");
 
   const addItem = (e: React.FormEvent) => {
     e.preventDefault();
@@ -209,6 +236,32 @@ export function ProposalEditor({
     <div className="grid grid-cols-[1fr_350px] border-t-2 border-divider max-lg:grid-cols-1">
       {/* Left — document + pricing */}
       <div className="border-r border-divider py-6 pr-8 max-lg:border-r-0 max-lg:pr-0">
+        {/* Start from a full template */}
+        {!locked && templates.length > 0 && (
+          <div className="mb-6 flex flex-wrap items-end gap-2 border border-divider bg-surface p-3">
+            <div className="field flex-1">
+              <label>Start from a template</label>
+              <select
+                className="input"
+                value=""
+                disabled={pending}
+                onChange={(e) => applyFullTemplate(e.target.value)}
+              >
+                <option value="">Prefill this proposal from…</option>
+                {templates.map((t) => (
+                  <option key={t.key} value={t.key}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <p className="w-full text-[12px] text-muted">
+              Applies the template&apos;s cover letter, scope, terms, line items, payment
+              schedule, and margin — replacing what&apos;s here now.
+            </p>
+          </div>
+        )}
+
         {/* Document content */}
         <div className="flex items-center justify-between">
           <MicroLabel>Proposal document</MicroLabel>
@@ -218,7 +271,10 @@ export function ProposalEditor({
         </div>
         <div className="field mt-3 space-y-3">
           <div>
-            <label>Cover letter</label>
+            <div className="flex items-center justify-between gap-2">
+              <label>Cover letter</label>
+              <SnippetPicker options={coverSnippets} onPick={setCover} disabled={pending} />
+            </div>
             <textarea
               className="input"
               rows={4}
@@ -228,7 +284,10 @@ export function ProposalEditor({
             />
           </div>
           <div>
-            <label>Scope of work</label>
+            <div className="flex items-center justify-between gap-2">
+              <label>Scope of work</label>
+              <SnippetPicker options={scopeSnippets} onPick={setScope} disabled={pending} />
+            </div>
             <textarea
               className="input"
               rows={5}
@@ -238,7 +297,10 @@ export function ProposalEditor({
             />
           </div>
           <div>
-            <label>Terms</label>
+            <div className="flex items-center justify-between gap-2">
+              <label>Terms</label>
+              <SnippetPicker options={termsSnippets} onPick={setTerms} disabled={pending} />
+            </div>
             <textarea
               className="input"
               rows={3}
@@ -248,6 +310,11 @@ export function ProposalEditor({
             />
           </div>
         </div>
+        {(coverSnippets.length > 0 || scopeSnippets.length > 0 || termsSnippets.length > 0) && (
+          <p className="mt-2 text-[12px] text-muted">
+            Inserting a snippet fills the box — click <strong className="text-ink">Save content</strong> to keep it.
+          </p>
+        )}
 
         {/* Scope & pricing */}
         <MicroLabel className="mt-8 block">Investment &amp; pricing</MicroLabel>
@@ -542,6 +609,36 @@ export function ProposalEditor({
         </p>
       </div>
     </div>
+  );
+}
+
+function SnippetPicker({
+  options,
+  onPick,
+  disabled,
+}: {
+  options: SnippetOption[];
+  onPick: (body: string) => void;
+  disabled?: boolean;
+}) {
+  if (options.length === 0) return null;
+  return (
+    <select
+      className="input h-8 w-[180px] text-[12px]"
+      value=""
+      disabled={disabled}
+      onChange={(e) => {
+        const s = options.find((o) => o.name === e.target.value);
+        if (s) onPick(s.body);
+      }}
+    >
+      <option value="">Insert snippet…</option>
+      {options.map((o) => (
+        <option key={o.name} value={o.name}>
+          {o.name}
+        </option>
+      ))}
+    </select>
   );
 }
 

@@ -46,5 +46,9 @@ services:
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
+      # Bearer token for the agent HTTP API (/api/agent/*). Generate a strong
+      # random value; agents send it as `Authorization: Bearer <key>`.
+      - key: AGENT_API_KEY
+        generateValue: true
       - key: NODE_VERSION
         value: "22"

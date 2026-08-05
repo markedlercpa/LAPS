@@ -287,6 +287,44 @@ model ProposalPayment {
   @@index([proposalId])
 }
 
+// Reusable proposal templates (agent- and human-selectable). A full template
+// prefills every proposal section + line items + payment schedule in one apply.
+model ProposalTemplate {
+  id                  String              @id @default(cuid())
+  key                 String              @unique
+  name                String
+  description         String?
+  defaultTitle        String
+  coverLetter         String?             @db.Text
+  scopeNarrative      String?             @db.Text
+  termsText           String?             @db.Text
+  paymentScheduleType PaymentScheduleType @default(ONE_TIME)
+  recurringInterval   String?
+  defaultDeliveryCost Decimal?            @db.Decimal(12, 2)
+  lineItems           Json // [{ description, quantity, unitPrice }]
+  payments            Json // [{ description, amount, dueOn }]
+  sortOrder           Int                 @default(0)
+  createdAt           DateTime            @default(now())
+}
+
+enum SnippetType {
+  COVER
+  SCOPE
+  TERMS
+}
+
+// Per-section reusable snippets that fill a single proposal section.
+model SectionSnippet {
+  id        String      @id @default(cuid())
+  key       String      @unique
+  type      SnippetType
+  name      String
+  body      String      @db.Text
+  sortOrder Int         @default(0)
+
+  @@index([type])
+}
+
 model ProposalLineItem {
   id          String  @id @default(cuid())
   proposalId  String

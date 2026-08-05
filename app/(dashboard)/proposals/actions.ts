@@ -1,25 +1,15 @@
 "use server";
 
-import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
-import { graphConfigured, sendMailAsUser } from "@/lib/graph";
-import { markProposalWon } from "@/lib/proposals";
+import { markProposalWon, applyProposalTemplate, sendProposalCore } from "@/lib/proposals";
 import type { ProposalStatus } from "@prisma/client";
 
 async function currentUserId() {
   const session = await auth();
   return session?.user?.id ?? null;
-}
-
-function appBaseUrl() {
-  return (
-    process.env.AUTH_URL ??
-    process.env.NEXTAUTH_URL ??
-    "http://localhost:3000"
-  ).replace(/\/$/, "");
 }
 
 const createSchema = z.object({
@@ -146,69 +136,27 @@ export async function deletePayment(id: string, proposalId: string) {
   return { ok: true };
 }
 
+/** Prefill this proposal from a full template (replaces sections + line items + schedule). */
+export async function applyTemplate(id: string, templateKey: string) {
+  const res = await applyProposalTemplate(id, templateKey);
+  if (!res.ok) return res;
+  revalidatePath(`/proposals/${id}`);
+  return { ok: true as const };
+}
+
 /**
- * Send the proposal to the prospect: generate the public share token, mark it
- * SENT, and email the client-facing link via Microsoft Graph (as the signed-in
- * rep). Degrades gracefully when Graph isn't connected — still returns the link
- * so the rep can copy it manually.
+ * Send the proposal to the prospect (generate the public link, mark SENT, email
+ * the client via Graph as the signed-in rep). Delegates to the shared core so
+ * the agent API can send the same way.
  */
 export async function sendProposal(id: string) {
-  const proposal = await prisma.proposal.findUnique({
-    where: { id },
-    include: { lineItems: true, lead: true },
-  });
-  if (!proposal) return { ok: false, error: "Proposal not found" };
-  if (proposal.lineItems.length === 0) {
-    return { ok: false, error: "Add at least one line item before sending." };
-  }
-  if (Number(proposal.estimatedDeliveryCost) <= 0) {
-    return {
-      ok: false,
-      error: "Enter the estimated delivery cost (margin) before sending.",
-    };
-  }
-
-  const token = proposal.publicToken ?? randomUUID();
-  const now = new Date();
-  // Don't downgrade a signed/won/lost proposal back to SENT if re-sent.
-  const openStatuses: ProposalStatus[] = ["DRAFT", "SENT", "VIEWED"];
-  await prisma.proposal.update({
-    where: { id },
-    data: {
-      publicToken: token,
-      status: openStatuses.includes(proposal.status) ? "SENT" : proposal.status,
-      sentAt: proposal.sentAt ?? now,
-    },
-  });
-
-  const link = `${appBaseUrl()}/p/${token}`;
-
-  let emailed = false;
-  let emailError: string | undefined;
   const userId = await currentUserId();
-  if (graphConfigured() && proposal.lead.email && userId) {
-    const clientName = proposal.lead.firstName || "there";
-    const html = `
-      <p>Hi ${clientName},</p>
-      <p>Your proposal <strong>${proposal.title}</strong> from Edler Zain is ready to review and sign.</p>
-      <p><a href="${link}">Review &amp; sign your proposal</a></p>
-      <p>Or paste this link into your browser:<br/>${link}</p>
-      <p>Thank you,<br/>Edler Zain</p>
-    `;
-    const res = await sendMailAsUser({
-      userId,
-      to: proposal.lead.email,
-      subject: `Your proposal from Edler Zain: ${proposal.title}`,
-      html,
-    });
-    emailed = res.ok;
-    emailError = res.error;
-  }
-
+  const res = await sendProposalCore(id, userId);
+  if (!res.ok) return res;
   revalidatePath(`/proposals/${id}`);
   revalidatePath("/proposals");
   revalidatePath("/pipeline");
-  return { ok: true, link, emailed, emailError };
+  return res;
 }
 
 /** Status transitions with pipeline side effects. */
