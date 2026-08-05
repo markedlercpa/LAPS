@@ -160,3 +160,90 @@ export async function fetchCalendarEvents(
   const json = (await res.json()) as { value: GraphEvent[] };
   return json.value ?? [];
 }
+
+export type BusyWindow = { start: Date; end: Date };
+
+/**
+ * Fetch busy intervals from the user's Outlook calendar in a window, in UTC.
+ * Uses the Prefer header so Graph returns UTC times (calendarView is otherwise
+ * in the mailbox timezone). Free/tentative-hidden events are excluded. Returns
+ * [] when the user isn't connected — callers treat that as "no known conflicts".
+ */
+export async function fetchBusyWindows(
+  userId: string,
+  startISO: string,
+  endISO: string,
+): Promise<BusyWindow[]> {
+  const token = await getUserGraphToken(userId);
+  if (!token) return [];
+  const res = await graphFetch(
+    token,
+    `/me/calendarView?startDateTime=${startISO}&endDateTime=${endISO}&$top=200&$select=start,end,showAs&$orderby=start/dateTime`,
+    { headers: { Prefer: 'outlook.timezone="UTC"' } },
+  );
+  const json = (await res.json()) as {
+    value: { start?: { dateTime?: string }; end?: { dateTime?: string }; showAs?: string }[];
+  };
+  const out: BusyWindow[] = [];
+  for (const ev of json.value ?? []) {
+    if (ev.showAs === "free") continue;
+    if (!ev.start?.dateTime || !ev.end?.dateTime) continue;
+    // Graph returns UTC without a "Z"; append it so Date parses as UTC.
+    const s = new Date(`${ev.start.dateTime}Z`.replace("ZZ", "Z"));
+    const e = new Date(`${ev.end.dateTime}Z`.replace("ZZ", "Z"));
+    if (!Number.isNaN(s.getTime()) && !Number.isNaN(e.getTime())) out.push({ start: s, end: e });
+  }
+  return out;
+}
+
+/**
+ * Create a calendar event on the host's Outlook calendar (no Teams meeting —
+ * we carry a Zoom link in the location/body). Returns the event id, or null if
+ * the host isn't connected or the call fails. Best-effort: never throws.
+ */
+export async function createCalendarEvent(
+  userId: string,
+  opts: {
+    subject: string;
+    startISO: string; // UTC ISO
+    endISO: string; // UTC ISO
+    bodyHtml?: string;
+    location?: string;
+    attendees?: { email: string; name?: string }[];
+  },
+): Promise<string | null> {
+  const token = await getUserGraphToken(userId);
+  if (!token) return null;
+  try {
+    const res = await graphFetch(token, "/me/events", {
+      method: "POST",
+      body: JSON.stringify({
+        subject: opts.subject,
+        body: { contentType: "HTML", content: opts.bodyHtml ?? "" },
+        start: { dateTime: opts.startISO, timeZone: "UTC" },
+        end: { dateTime: opts.endISO, timeZone: "UTC" },
+        ...(opts.location ? { location: { displayName: opts.location } } : {}),
+        attendees: (opts.attendees ?? []).map((a) => ({
+          emailAddress: { address: a.email, name: a.name ?? a.email },
+          type: "required",
+        })),
+      }),
+    });
+    const json = (await res.json()) as { id?: string };
+    return json.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Delete a calendar event by id. Best-effort. */
+export async function deleteCalendarEvent(userId: string, eventId: string): Promise<boolean> {
+  const token = await getUserGraphToken(userId);
+  if (!token) return false;
+  try {
+    await graphFetch(token, `/me/events/${eventId}`, { method: "DELETE" });
+    return true;
+  } catch {
+    return false;
+  }
+}

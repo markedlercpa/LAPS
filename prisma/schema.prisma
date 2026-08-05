@@ -38,6 +38,7 @@ model User {
   proposals    Proposal[]     @relation("ProposalOwner")
   activities   Activity[]
   actionItems  ActionItem[]   @relation("ActionItemAssignee")
+  bookingHost  BookingHost?
 }
 
 model Account {
@@ -168,12 +169,28 @@ model Appointment {
   notes       String?           @db.Text
   createdAt   DateTime          @default(now())
 
+  // Self-serve booking fields (populated when booked via a public /book page).
+  eventTypeId     String?
+  eventType       BookingEventType? @relation(fields: [eventTypeId], references: [id], onDelete: SetNull)
+  inviteeName     String?
+  inviteeEmail    String?
+  inviteePhone    String?
+  timezone        String?
+  location        String?
+  meetingUrl      String?
+  answers         Json? // screening question answers
+  rescheduleToken String?           @unique
+  cancelToken     String?           @unique
+  reminderSentAt  DateTime?
+  bookedVia       String?
+
   lead        Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
   owner       User?        @relation("AppointmentOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   actionItems ActionItem[]
 
   @@index([leadId])
   @@index([scheduledAt])
+  @@index([eventTypeId])
 }
 
 enum ActionItemStatus {
@@ -692,4 +709,84 @@ model TrustSignal {
   createdAt  DateTime        @default(now())
 
   @@index([leadId])
+}
+
+// ── Scheduling — self-serve booking (Calendly-style) ──────────────────────
+enum BookingLocationType {
+  ZOOM
+  PHONE
+  IN_PERSON
+  CUSTOM
+}
+
+// One per host user: their public booking identity + default availability.
+model BookingHost {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slug        String   @unique
+  displayName String?
+  welcome     String?  @db.Text
+  timezone    String   @default("America/New_York")
+  zoomLink    String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  eventTypes BookingEventType[]
+  rules      AvailabilityRule[]
+  overrides  AvailabilityOverride[]
+}
+
+// Weekly recurring availability window (minutes-from-midnight, host timezone).
+model AvailabilityRule {
+  id       String      @id @default(cuid())
+  hostId   String
+  host     BookingHost @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  weekday  Int // 0=Sunday .. 6=Saturday
+  startMin Int
+  endMin   Int
+
+  @@index([hostId])
+}
+
+// Per-date exception: blackout (available=false) or custom hours (available=true).
+model AvailabilityOverride {
+  id        String      @id @default(cuid())
+  hostId    String
+  host      BookingHost @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  date      DateTime    @db.Date
+  available Boolean     @default(false)
+  startMin  Int?
+  endMin    Int?
+
+  @@unique([hostId, date])
+}
+
+// A bookable meeting type (duration, location, rules, screening questions).
+model BookingEventType {
+  id              String              @id @default(cuid())
+  hostId          String
+  host            BookingHost         @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  slug            String
+  name            String
+  description     String?             @db.Text
+  durationMin     Int                 @default(30)
+  locationType    BookingLocationType @default(ZOOM)
+  location        String? // overrides host zoomLink when set
+  bufferBeforeMin Int                 @default(0)
+  bufferAfterMin  Int                 @default(0)
+  minNoticeMin    Int                 @default(240)
+  rollingDays     Int                 @default(60)
+  maxPerDay       Int?
+  color           String?
+  active          Boolean             @default(true)
+  questions       Json                @default("[]") // [{id,label,type,required}]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  appointments Appointment[]
+
+  @@unique([hostId, slug])
+  @@index([hostId])
 }
