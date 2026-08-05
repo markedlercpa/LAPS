@@ -325,6 +325,22 @@ model SectionSnippet {
   @@index([type])
 }
 
+// Firm-level brochure / social proof shown on the client proposal page. Single
+// row (id "default"). Content is JSON so agents/humans can edit freely.
+// isPlaceholder stays true until real content is set — the client page shows a
+// "sample content" banner while true so example stats never look real.
+model Brochure {
+  id            String   @id @default("default")
+  headline      String?
+  intro         String?  @db.Text
+  stats         Json // [{ value, label }]
+  caseStudies   Json // [{ service, title, result, detail }]
+  testimonials  Json // [{ quote, author, role }]
+  linkedinPosts Json // [{ excerpt, url }]
+  isPlaceholder Boolean  @default(true)
+  updatedAt     DateTime @updatedAt
+}
+
 model ProposalLineItem {
   id          String  @id @default(cuid())
   proposalId  String

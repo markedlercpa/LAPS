@@ -11,12 +11,14 @@ export function SignProposal({
   defaultEmail,
   depositAmount = 0,
   paymentRequired = false,
+  onSigned,
 }: {
   token: string;
   defaultName?: string;
   defaultEmail?: string;
   depositAmount?: number;
   paymentRequired?: boolean;
+  onSigned?: () => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -44,6 +46,8 @@ export function SignProposal({
         window.location.href = res.redirectUrl;
         return;
       }
+      // Signed directly (no deposit) — advance the wizard, then refresh content.
+      onSigned?.();
       router.refresh();
     });
   };

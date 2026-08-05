@@ -188,4 +188,7 @@
   .no-print { display: none !important; }
   body { background: #fff !important; }
   .table tbody tr:hover { background: transparent !important; }
+  /* Reveal every wizard panel so the printed PDF is the whole proposal. */
+  .reader-panel { display: block !important; }
+  .reader-panel + .reader-panel { margin-top: 32px; page-break-before: always; }
 }
