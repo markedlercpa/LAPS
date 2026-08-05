@@ -621,6 +621,7 @@ model ContentItem {
 
   evidence EvidenceRecord[] @relation("ContentEvidence")
   cards    CallingCard[]    @relation("ContentCards")
+  metrics  MetricSnapshot[]
 
   publishedUrl String?
   publishedAt  DateTime?
@@ -631,6 +632,27 @@ model ContentItem {
   @@index([status])
   @@index([channel])
   @@index([moduleId])
+}
+
+// ── O — Optics: how content performed once published ──────────────────────
+// Manually aggregated for now (no analytics connector). Each snapshot is a
+// point-in-time reading of a piece's numbers; resonance is derived.
+model MetricSnapshot {
+  id            String          @id @default(cuid())
+  contentItemId String?
+  contentItem   ContentItem?    @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  channel       ContentChannel?
+  capturedAt    DateTime        @default(now())
+  impressions   Int             @default(0)
+  engagements   Int             @default(0)
+  clicks        Int             @default(0)
+  conversions   Int             @default(0)
+  note          String?
+  source        String?
+  createdAt     DateTime        @default(now())
+
+  @@index([contentItemId])
+  @@index([capturedAt])
 }
 
 // Hard guardrail: phrases that fail draft/card validation on sight.

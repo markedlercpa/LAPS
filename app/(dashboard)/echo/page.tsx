@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Vault, Megaphone, PenLine } from "lucide-react";
+import { Vault, Megaphone, PenLine, LineChart } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { prisma } from "@/lib/prisma";
 
@@ -9,17 +9,19 @@ const LAYERS = [
   { letter: "E", name: "Evidence", body: "Real language from calls, engagements, and emails — pains, objections, myths, prize states, and our methodology." },
   { letter: "C", name: "Calling Cards", body: "The repeatable, ownable language bank that etches our understanding into the reader's mind." },
   { letter: "H", name: "Housed Content", body: "The content builder + repurposing engine across every channel — every piece traced to evidence." },
-  { letter: "O", name: "Optics", body: "How content performed once published — resonance tracking and reporting. (Coming next.)" },
+  { letter: "O", name: "Optics", body: "How content performed once published — resonance tracking, aggregated manually for now." },
 ];
 
 export default async function EchoOverviewPage() {
-  const [evidenceCount, cardCount, activeCards, contentCount, publishedCount] = await Promise.all([
-    prisma.evidenceRecord.count(),
-    prisma.callingCard.count(),
-    prisma.callingCard.count({ where: { status: "ACTIVE" } }),
-    prisma.contentItem.count(),
-    prisma.contentItem.count({ where: { status: "PUBLISHED" } }),
-  ]);
+  const [evidenceCount, cardCount, activeCards, contentCount, publishedCount, snapshotCount] =
+    await Promise.all([
+      prisma.evidenceRecord.count(),
+      prisma.callingCard.count(),
+      prisma.callingCard.count({ where: { status: "ACTIVE" } }),
+      prisma.contentItem.count(),
+      prisma.contentItem.count({ where: { status: "PUBLISHED" } }),
+      prisma.metricSnapshot.count(),
+    ]);
 
   return (
     <div>
@@ -59,6 +61,16 @@ export default async function EchoOverviewPage() {
             {contentCount}
           </div>
           <div className="text-[13px] text-muted">{publishedCount} published</div>
+        </Link>
+        <Link href="/echo/optics" className="border-2 border-ink bg-surface p-5 hover:bg-bg">
+          <div className="flex items-center gap-2">
+            <LineChart className="h-5 w-5" />
+            <div className="micro-label">Optics</div>
+          </div>
+          <div className="mt-2 font-heading text-[34px] font-extrabold [font-variant-numeric:tabular-nums]">
+            {snapshotCount}
+          </div>
+          <div className="text-[13px] text-muted">snapshots</div>
         </Link>
       </div>
 
