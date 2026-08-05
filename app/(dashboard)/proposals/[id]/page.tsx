@@ -18,9 +18,10 @@ export default async function ProposalDetailPage({
   const proposal = await prisma.proposal.findUnique({
     where: { id },
     include: {
-      lead: { select: { id: true, firstName: true, lastName: true, companyName: true } },
+      lead: { select: { id: true, firstName: true, lastName: true, companyName: true, email: true } },
       owner: { select: { name: true, email: true } },
       lineItems: { orderBy: { sortOrder: "asc" } },
+      payments: { orderBy: { sortOrder: "asc" } },
     },
   });
 
@@ -29,6 +30,13 @@ export default async function ProposalDetailPage({
   const client =
     proposal.lead.companyName ??
     `${proposal.lead.firstName} ${proposal.lead.lastName}`;
+
+  const base = (
+    process.env.AUTH_URL ??
+    process.env.NEXTAUTH_URL ??
+    "http://localhost:3000"
+  ).replace(/\/$/, "");
+  const shareUrl = proposal.publicToken ? `${base}/p/${proposal.publicToken}` : null;
 
   return (
     <div>
@@ -56,15 +64,32 @@ export default async function ProposalDetailPage({
       </div>
 
       <ProposalEditor
+        shareUrl={shareUrl}
         proposal={{
           id: proposal.id,
           status: proposal.status,
           estimatedDeliveryCost: Number(proposal.estimatedDeliveryCost),
+          coverLetter: proposal.coverLetter,
+          scopeNarrative: proposal.scopeNarrative,
+          termsText: proposal.termsText,
+          paymentScheduleType: proposal.paymentScheduleType,
+          recurringInterval: proposal.recurringInterval,
+          sentAt: proposal.sentAt?.toISOString() ?? null,
+          viewedAt: proposal.viewedAt?.toISOString() ?? null,
+          signedAt: proposal.signedAt?.toISOString() ?? null,
+          signerName: proposal.signerName,
+          leadHasEmail: Boolean(proposal.lead.email),
           lineItems: proposal.lineItems.map((li) => ({
             id: li.id,
             description: li.description,
             quantity: Number(li.quantity),
             unitPrice: Number(li.unitPrice),
+          })),
+          payments: proposal.payments.map((p) => ({
+            id: p.id,
+            description: p.description,
+            amount: Number(p.amount),
+            dueOn: p.dueOn,
           })),
         }}
       />

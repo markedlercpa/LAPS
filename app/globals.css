@@ -181,3 +181,11 @@
   }
   .dialog-title { font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 20px; }
 }
+
+/* Print — used by the public proposal page (browser "Save as PDF"). */
+.no-print { }
+@media print {
+  .no-print { display: none !important; }
+  body { background: #fff !important; }
+  .table tbody tr:hover { background: transparent !important; }
+}

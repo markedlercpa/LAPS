@@ -1,15 +1,25 @@
 "use server";
 
+import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
-import { ONBOARDING_CHECKLIST_TEMPLATE } from "@/lib/constants";
+import { graphConfigured, sendMailAsUser } from "@/lib/graph";
+import { markProposalWon } from "@/lib/proposals";
 import type { ProposalStatus } from "@prisma/client";
 
 async function currentUserId() {
   const session = await auth();
   return session?.user?.id ?? null;
+}
+
+function appBaseUrl() {
+  return (
+    process.env.AUTH_URL ??
+    process.env.NEXTAUTH_URL ??
+    "http://localhost:3000"
+  ).replace(/\/$/, "");
 }
 
 const createSchema = z.object({
@@ -80,6 +90,127 @@ export async function deleteLineItem(id: string, proposalId: string) {
   return { ok: true };
 }
 
+const contentSchema = z.object({
+  coverLetter: z.string().optional(),
+  scopeNarrative: z.string().optional(),
+  termsText: z.string().optional(),
+});
+
+/** Update the client-facing document sections. */
+export async function updateProposalContent(id: string, input: unknown) {
+  const parsed = contentSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid input" };
+  await prisma.proposal.update({ where: { id }, data: parsed.data });
+  revalidatePath(`/proposals/${id}`);
+  return { ok: true };
+}
+
+const paymentMetaSchema = z.object({
+  paymentScheduleType: z
+    .enum(["ONE_TIME", "DEPOSIT_THEN_BALANCE", "INSTALLMENTS", "RECURRING"])
+    .optional(),
+  recurringInterval: z.string().optional(),
+});
+
+export async function updatePaymentMeta(id: string, input: unknown) {
+  const parsed = paymentMetaSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid input" };
+  await prisma.proposal.update({ where: { id }, data: parsed.data });
+  revalidatePath(`/proposals/${id}`);
+  return { ok: true };
+}
+
+const paymentSchema = z.object({
+  proposalId: z.string(),
+  description: z.string().min(1, "Description required"),
+  amount: z.coerce.number().min(0).default(0),
+  dueOn: z.string().optional(),
+});
+
+export async function addPayment(input: unknown) {
+  const parsed = paymentSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+  const count = await prisma.proposalPayment.count({
+    where: { proposalId: parsed.data.proposalId },
+  });
+  await prisma.proposalPayment.create({ data: { ...parsed.data, sortOrder: count } });
+  revalidatePath(`/proposals/${parsed.data.proposalId}`);
+  return { ok: true };
+}
+
+export async function deletePayment(id: string, proposalId: string) {
+  await prisma.proposalPayment.delete({ where: { id } });
+  revalidatePath(`/proposals/${proposalId}`);
+  return { ok: true };
+}
+
+/**
+ * Send the proposal to the prospect: generate the public share token, mark it
+ * SENT, and email the client-facing link via Microsoft Graph (as the signed-in
+ * rep). Degrades gracefully when Graph isn't connected — still returns the link
+ * so the rep can copy it manually.
+ */
+export async function sendProposal(id: string) {
+  const proposal = await prisma.proposal.findUnique({
+    where: { id },
+    include: { lineItems: true, lead: true },
+  });
+  if (!proposal) return { ok: false, error: "Proposal not found" };
+  if (proposal.lineItems.length === 0) {
+    return { ok: false, error: "Add at least one line item before sending." };
+  }
+  if (Number(proposal.estimatedDeliveryCost) <= 0) {
+    return {
+      ok: false,
+      error: "Enter the estimated delivery cost (margin) before sending.",
+    };
+  }
+
+  const token = proposal.publicToken ?? randomUUID();
+  const now = new Date();
+  // Don't downgrade a signed/won/lost proposal back to SENT if re-sent.
+  const openStatuses: ProposalStatus[] = ["DRAFT", "SENT", "VIEWED"];
+  await prisma.proposal.update({
+    where: { id },
+    data: {
+      publicToken: token,
+      status: openStatuses.includes(proposal.status) ? "SENT" : proposal.status,
+      sentAt: proposal.sentAt ?? now,
+    },
+  });
+
+  const link = `${appBaseUrl()}/p/${token}`;
+
+  let emailed = false;
+  let emailError: string | undefined;
+  const userId = await currentUserId();
+  if (graphConfigured() && proposal.lead.email && userId) {
+    const clientName = proposal.lead.firstName || "there";
+    const html = `
+      <p>Hi ${clientName},</p>
+      <p>Your proposal <strong>${proposal.title}</strong> from Edler Zain is ready to review and sign.</p>
+      <p><a href="${link}">Review &amp; sign your proposal</a></p>
+      <p>Or paste this link into your browser:<br/>${link}</p>
+      <p>Thank you,<br/>Edler Zain</p>
+    `;
+    const res = await sendMailAsUser({
+      userId,
+      to: proposal.lead.email,
+      subject: `Your proposal from Edler Zain: ${proposal.title}`,
+      html,
+    });
+    emailed = res.ok;
+    emailError = res.error;
+  }
+
+  revalidatePath(`/proposals/${id}`);
+  revalidatePath("/proposals");
+  revalidatePath("/pipeline");
+  return { ok: true, link, emailed, emailError };
+}
+
 /** Status transitions with pipeline side effects. */
 export async function setProposalStatus(id: string, status: ProposalStatus) {
   const proposal = await prisma.proposal.findUnique({
@@ -88,9 +219,8 @@ export async function setProposalStatus(id: string, status: ProposalStatus) {
   });
   if (!proposal) return { ok: false, error: "Proposal not found" };
 
-  // Guardrails before marking WON: need line items and a delivery budget so the
-  // estimated margin is meaningful.
   if (status === "WON") {
+    // Guardrails: need line items and a delivery budget so margin is meaningful.
     if (proposal.lineItems.length === 0) {
       return { ok: false, error: "Add at least one line item before winning." };
     }
@@ -100,6 +230,12 @@ export async function setProposalStatus(id: string, status: ProposalStatus) {
         error: "Enter the estimated delivery cost (margin) before winning.",
       };
     }
+    const res = await markProposalWon(id);
+    if (!res.ok) return res;
+    revalidatePath(`/proposals/${id}`);
+    revalidatePath("/proposals");
+    revalidatePath("/sales");
+    return { ok: true };
   }
 
   const now = new Date();
@@ -109,30 +245,11 @@ export async function setProposalStatus(id: string, status: ProposalStatus) {
       status,
       sentAt: status === "SENT" && !proposal.sentAt ? now : proposal.sentAt,
       signedAt: status === "SIGNED" && !proposal.signedAt ? now : proposal.signedAt,
-      wonAt: status === "WON" ? now : proposal.wonAt,
       lostAt: status === "LOST" ? now : proposal.lostAt,
     },
   });
 
-  if (status === "WON") {
-    await prisma.lead.update({
-      where: { id: proposal.leadId },
-      data: { stage: "CLOSED_WON" },
-    });
-    if (!proposal.handoff) {
-      await prisma.handoff.create({
-        data: {
-          proposalId: id,
-          checklist: {
-            create: ONBOARDING_CHECKLIST_TEMPLATE.map((label, idx) => ({
-              label,
-              sortOrder: idx,
-            })),
-          },
-        },
-      });
-    }
-  } else if (status === "LOST") {
+  if (status === "LOST") {
     await prisma.lead.update({
       where: { id: proposal.leadId },
       data: { stage: "CLOSED_LOST" },

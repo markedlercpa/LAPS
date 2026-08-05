@@ -212,6 +212,13 @@ enum ProposalStatus {
   LOST
 }
 
+enum PaymentScheduleType {
+  ONE_TIME
+  DEPOSIT_THEN_BALANCE
+  INSTALLMENTS
+  RECURRING
+}
+
 model Proposal {
   id                   String         @id @default(cuid())
   hubspotId            String?        @unique
@@ -222,18 +229,49 @@ model Proposal {
   estimatedDeliveryCost Decimal       @default(0) @db.Decimal(12, 2)
   createdAt            DateTime       @default(now())
   sentAt              DateTime?
+  viewedAt            DateTime?
   signedAt            DateTime?
   wonAt               DateTime?
   lostAt              DateTime?
   lostReason          String?
 
+  // Client-facing document content (shown on the public proposal page)
+  coverLetter    String? @db.Text
+  scopeNarrative String? @db.Text
+  termsText      String? @db.Text
+
+  // Public share + e-signature capability + audit trail
+  publicToken      String? @unique
+  signerName       String?
+  signerEmail      String?
+  signedIp         String?
+  signedUserAgent  String?
+
+  // Payment schedule (stored + displayed now; collection wired in a later phase)
+  paymentScheduleType PaymentScheduleType @default(ONE_TIME)
+  recurringInterval   String?
+
   lead      Lead                @relation(fields: [leadId], references: [id], onDelete: Cascade)
   owner     User?               @relation("ProposalOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   lineItems ProposalLineItem[]
+  payments  ProposalPayment[]
   handoff   Handoff?
 
   @@index([leadId])
   @@index([status])
+}
+
+model ProposalPayment {
+  id          String  @id @default(cuid())
+  proposalId  String
+  description String
+  amount      Decimal @default(0) @db.Decimal(12, 2)
+  dueOn       String?
+  sortOrder   Int     @default(0)
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@index([proposalId])
 }
 
 model ProposalLineItem {
