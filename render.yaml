@@ -32,5 +32,8 @@ services:
         value: https://laps-wxm8.onrender.com
       - key: NEXTAUTH_URL
         value: https://laps-wxm8.onrender.com
+      # One-time gate for /api/admin/import (remove this + the route + data after loading).
+      - key: IMPORT_SECRET
+        value: f0a11b9b8791135cf219c90323935832
       - key: NODE_VERSION
         value: "22"
