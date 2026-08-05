@@ -50,5 +50,9 @@ services:
       # random value; agents send it as `Authorization: Bearer <key>`.
       - key: AGENT_API_KEY
         generateValue: true
+      # ECHO Fireflies evidence feed. Set in the Render dashboard. When unset,
+      # ECHO's Fireflies import shows "not connected".
+      - key: FIREFLIES_API_KEY
+        sync: false
       - key: NODE_VERSION
         value: "22"

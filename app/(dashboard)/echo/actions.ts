@@ -4,6 +4,12 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { findBannedPhrases } from "@/lib/echo";
+import {
+  firefliesConfigured,
+  listRecentTranscripts,
+  getTranscriptDetail,
+  transcriptToText,
+} from "@/lib/fireflies";
 
 const pillar = z.enum([
   "EARNINGS",
@@ -110,4 +116,77 @@ export async function setCardStatus(id: string, status: "CANDIDATE" | "ACTIVE" |
   await prisma.callingCard.update({ where: { id }, data: { status } });
   revalidatePath("/echo/calling-cards");
   return { ok: true as const };
+}
+
+// ── Fireflies evidence feed ───────────────────────────────────────────────
+
+/** List recent Fireflies transcripts for the import picker (human-visible). */
+export async function listFirefliesForImport() {
+  if (!firefliesConfigured()) {
+    return { ok: false as const, configured: false, transcripts: [] };
+  }
+  try {
+    const transcripts = await listRecentTranscripts(25);
+    // Flag which are already in the vault so we don't double-import.
+    const refs = transcripts.map((t) => `fireflies:${t.id}`);
+    const existing = await prisma.evidenceRecord.findMany({
+      where: { sourceRef: { in: refs } },
+      select: { sourceRef: true },
+    });
+    const imported = new Set(existing.map((e) => e.sourceRef));
+    return {
+      ok: true as const,
+      configured: true,
+      transcripts: transcripts.map((t) => ({
+        ...t,
+        imported: imported.has(`fireflies:${t.id}`),
+      })),
+    };
+  } catch (e) {
+    return {
+      ok: false as const,
+      configured: true,
+      transcripts: [],
+      error: e instanceof Error ? e.message : "Fireflies request failed",
+    };
+  }
+}
+
+/**
+ * Import a Fireflies transcript as a raw evidence candidate. Stored with
+ * INTERNAL_ONLY consent and the meeting title as the (internal) clientRef; a
+ * human or agent then distills + tags it. Idempotent per transcript.
+ */
+export async function importFirefliesTranscript(transcriptId: string) {
+  if (!firefliesConfigured()) {
+    return { ok: false as const, error: "Fireflies is not connected." };
+  }
+  const sourceRef = `fireflies:${transcriptId}`;
+  const already = await prisma.evidenceRecord.findFirst({ where: { sourceRef } });
+  if (already) return { ok: true as const, id: already.id, alreadyImported: true };
+
+  try {
+    const detail = await getTranscriptDetail(transcriptId);
+    const rawText = transcriptToText(detail);
+    if (!rawText.trim()) {
+      return { ok: false as const, error: "Transcript has no content yet." };
+    }
+    const record = await prisma.evidenceRecord.create({
+      data: {
+        type: "CLIENT_STORY",
+        source: "FIREFLIES_TRANSCRIPT",
+        sourceRef,
+        rawText,
+        distilled: detail.overview || null,
+        clientRef: detail.title,
+        consent: "INTERNAL_ONLY",
+        pillarTags: [],
+        strength: 3,
+      },
+    });
+    revalidatePath("/echo/evidence");
+    return { ok: true as const, id: record.id, alreadyImported: false };
+  } catch (e) {
+    return { ok: false as const, error: e instanceof Error ? e.message : "Import failed" };
+  }
 }

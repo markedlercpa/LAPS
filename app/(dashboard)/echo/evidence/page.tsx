@@ -11,6 +11,8 @@ import {
   CONSENT_LABELS,
 } from "@/lib/echo-taxonomy";
 import { NewEvidence } from "@/components/echo/new-evidence";
+import { FirefliesImport } from "@/components/echo/fireflies-import";
+import { firefliesConfigured } from "@/lib/fireflies";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +55,7 @@ export default async function EvidenceVaultPage({
         title="Evidence vault"
         description="The foundation. Every piece of content must trace back to at least one record here."
       >
+        {firefliesConfigured() && <FirefliesImport />}
         <NewEvidence />
       </PageHeader>
 
