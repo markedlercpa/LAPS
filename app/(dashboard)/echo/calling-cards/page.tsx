@@ -32,18 +32,6 @@ export default async function CallingCardsPage() {
         <NewCallingCard bannedPhrases={banned.map((b) => b.phrase)} />
       </PageHeader>
 
-      {/* Banned phrases guardrail */}
-      <div className="mb-6 border-2 border-divider bg-surface p-3">
-        <div className="micro-label">Retired / banned language (never allowed)</div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {banned.map((b) => (
-            <span key={b.phrase} className="tag tag-neutral line-through" title={b.reason ?? ""}>
-              {b.phrase}
-            </span>
-          ))}
-        </div>
-      </div>
-
       {cards.length === 0 ? (
         <div className="border-2 border-divider bg-surface p-8 text-center text-muted">
           No calling cards yet. Add the language you want to own.
