@@ -3,6 +3,7 @@
 import type { Stage } from "@prisma/client";
 import { DataTable, type Column } from "@/components/data-table";
 import { StageBadge } from "@/components/status-badge";
+import { TrustBadge } from "@/components/leads/trust-badge";
 import { formatDate } from "@/lib/utils";
 
 export type LeadRow = {
@@ -15,6 +16,7 @@ export type LeadRow = {
   phone: string | null;
   stage: Stage;
   ownerName: string;
+  trustScore: number;
   createdAt: string;
 };
 
@@ -43,6 +45,14 @@ export function LeadsTable({
     { key: "email", header: "Email", render: (r) => <span className="text-muted">{r.email || "—"}</span> },
     { key: "ownerName", header: "Owner", sortable: true, render: (r) => <span className="text-muted">{r.ownerName}</span> },
     { key: "stage", header: "Stage", render: (r) => <StageBadge stage={r.stage} /> },
+    {
+      key: "trustScore",
+      header: "Trust",
+      sortable: true,
+      numeric: true,
+      sortValue: (r) => r.trustScore,
+      render: (r) => <TrustBadge score={r.trustScore} />,
+    },
     {
       key: "createdAt",
       header: "Created",

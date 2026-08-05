@@ -7,6 +7,8 @@ import { MicroLabel } from "@/components/micro-label";
 import { LeadActivityPanel } from "@/components/leads/lead-activity-panel";
 import { LeadStageSelect } from "@/components/leads/lead-stage-select";
 import { EditLeadButton } from "@/components/leads/edit-lead-button";
+import { LeadTrustPanel, type TrustSignalRow } from "@/components/leads/lead-trust-panel";
+import { TrustBadge } from "@/components/leads/trust-badge";
 import type { ActivityRow } from "@/components/leads/activity-timeline";
 import { formatDate } from "@/lib/utils";
 import { PROPOSAL_STATUS_LABELS, APPOINTMENT_STATUS_LABELS } from "@/lib/constants";
@@ -29,10 +31,20 @@ export default async function LeadDetailPage({
       },
       appointments: { orderBy: { scheduledAt: "desc" } },
       proposals: { orderBy: { createdAt: "desc" } },
+      trustSignals: { orderBy: { occurredAt: "desc" } },
     },
   });
 
   if (!lead) notFound();
+
+  const trustSignals: TrustSignalRow[] = lead.trustSignals.map((s) => ({
+    id: s.id,
+    kind: s.kind,
+    weight: s.weight,
+    note: s.note,
+    source: s.source,
+    occurredAt: s.occurredAt.toISOString(),
+  }));
 
   const activities: ActivityRow[] = lead.activities.map((a) => ({
     id: a.id,
@@ -73,6 +85,7 @@ export default async function LeadDetailPage({
           )}
         </div>
         <div className="flex items-center gap-2">
+          <TrustBadge score={lead.trustScore} />
           <LeadStageSelect leadId={lead.id} stage={lead.stage} />
           <EditLeadButton
             leadId={lead.id}
@@ -101,6 +114,10 @@ export default async function LeadDetailPage({
               </div>
             ))}
           </dl>
+
+          <div className="mb-6">
+            <LeadTrustPanel leadId={lead.id} score={lead.trustScore} signals={trustSignals} />
+          </div>
 
           <MicroLabel>Related</MicroLabel>
           <div className="mt-2 text-[13px]">

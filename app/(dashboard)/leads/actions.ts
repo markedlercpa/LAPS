@@ -167,3 +167,41 @@ export async function syncLeadInbound(leadId: string) {
   revalidatePath(`/leads/${leadId}`);
   return { ok: true, created };
 }
+
+// ── ECHO → LAPS: trust signals ────────────────────────────────────────────
+
+const trustSignalSchema = z.object({
+  leadId: z.string().min(1),
+  kind: z.enum([
+    "CONTENT_VIEW",
+    "CONTENT_ENGAGE",
+    "EMAIL_REPLY",
+    "MEETING_ATTENDED",
+    "WEBINAR",
+    "DOWNLOAD",
+    "REFERRAL",
+    "INBOUND_INQUIRY",
+    "MANUAL",
+  ]),
+  weight: z.coerce.number().int().optional(),
+  note: z.string().optional(),
+});
+
+/** Record a trust signal on a lead (human-visible surface over ECHO handoff). */
+export async function addLeadTrustSignal(input: unknown) {
+  const parsed = trustSignalSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+  const { addTrustSignal } = await import("@/lib/trust");
+  const { score } = await addTrustSignal({
+    leadId: parsed.data.leadId,
+    kind: parsed.data.kind,
+    weight: parsed.data.weight ?? null,
+    note: parsed.data.note || null,
+    source: "manual",
+  });
+  revalidatePath(`/leads/${parsed.data.leadId}`);
+  revalidatePath("/leads");
+  return { ok: true as const, score };
+}

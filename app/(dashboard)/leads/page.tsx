@@ -34,6 +34,7 @@ export default async function LeadsPage({
     phone: l.phone,
     stage: l.stage,
     ownerName: ownerName(l.owner),
+    trustScore: l.trustScore,
     createdAt: l.createdAt.toISOString(),
   }));
 
@@ -45,6 +46,7 @@ export default async function LeadsPage({
     companyName: l.companyName,
     leadSource: l.leadSource,
     ownerName: ownerName(l.owner),
+    trustScore: l.trustScore,
   }));
 
   const activeCount = leads.filter(

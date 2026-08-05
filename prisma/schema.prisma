@@ -99,6 +99,7 @@ model Lead {
   stage       Stage    @default(NEW)
   lostReason  String?
   notes       String?  @db.Text
+  trustScore  Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -109,6 +110,7 @@ model Lead {
   appointments Appointment[]
   proposals    Proposal[]
   actionItems  ActionItem[]
+  trustSignals TrustSignal[]
 
   @@index([stage])
   @@index([ownerId])
@@ -559,4 +561,35 @@ model BannedPhrase {
   phrase    String   @unique
   reason    String?
   createdAt DateTime @default(now())
+}
+
+// ── ECHO → LAPS handoff: per-lead trust score ─────────────────────────────
+// Trust is earned in ECHO (content engagement) and converted in LAPS. Each
+// signal is a weighted engagement event; Lead.trustScore caches the rollup so
+// the pipeline and lead lists stay cheap to render.
+enum TrustSignalKind {
+  CONTENT_VIEW
+  CONTENT_ENGAGE
+  EMAIL_REPLY
+  MEETING_ATTENDED
+  WEBINAR
+  DOWNLOAD
+  REFERRAL
+  INBOUND_INQUIRY
+  MANUAL
+}
+
+model TrustSignal {
+  id         String          @id @default(cuid())
+  leadId     String
+  lead       Lead            @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  kind       TrustSignalKind
+  weight     Int
+  note       String?
+  contentRef String?
+  source     String?
+  occurredAt DateTime        @default(now())
+  createdAt  DateTime        @default(now())
+
+  @@index([leadId])
 }

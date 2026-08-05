@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Stage } from "@prisma/client";
 import { STAGE_LABELS } from "@/lib/constants";
+import { TrustBadge } from "@/components/leads/trust-badge";
 import { cn, initials } from "@/lib/utils";
 
 export type BoardLead = {
@@ -11,6 +12,7 @@ export type BoardLead = {
   companyName: string | null;
   leadSource: string | null;
   ownerName: string;
+  trustScore: number;
 };
 
 const STAGE_ORDER: Stage[] = ["NEW", "APPOINTMENT", "PROPOSAL", "CLOSED_WON", "CLOSED_LOST"];
@@ -50,7 +52,10 @@ export function LeadsBoard({ leads }: { leads: BoardLead[] }) {
                   </div>
                   <div className="card-meta justify-between">
                     <span>{l.leadSource ?? "—"}</span>
-                    <span>{initials(l.ownerName)}</span>
+                    <span className="flex items-center gap-1.5">
+                      {l.trustScore > 0 && <TrustBadge score={l.trustScore} showScore={false} />}
+                      {initials(l.ownerName)}
+                    </span>
                   </div>
                 </Link>
               ))}
