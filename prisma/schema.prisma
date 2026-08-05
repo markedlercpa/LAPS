@@ -521,7 +521,8 @@ model EvidenceRecord {
   lastUsedAt DateTime?
   createdAt  DateTime       @default(now())
 
-  cards CallingCard[] @relation("CardEvidence")
+  cards        CallingCard[]  @relation("CardEvidence")
+  contentItems ContentItem[]  @relation("ContentEvidence")
 
   @@index([type])
   @@index([source])
@@ -550,9 +551,86 @@ model CallingCard {
   performanceIndex Float        @default(0)
   createdAt        DateTime     @default(now())
 
-  evidence EvidenceRecord[] @relation("CardEvidence")
+  evidence     EvidenceRecord[] @relation("CardEvidence")
+  contentItems ContentItem[]    @relation("ContentCards")
 
   @@index([status])
+}
+
+// ── H — Housed Content: the content builder + repurposing engine ──────────
+enum ContentChannel {
+  LINKEDIN
+  X
+  EMAIL
+  NEWSLETTER
+  BLOG
+  YOUTUBE
+  PODCAST
+  WEBSITE
+  BOOK
+  OTHER
+}
+
+enum ContentStatus {
+  DRAFT
+  REVIEW
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ModuleKind {
+  BOOK
+  CAMPAIGN
+  SERIES
+  COURSE
+  OTHER
+}
+
+// A grouping of content items — a book (chapters), a campaign, a series.
+model ContentModule {
+  id          String     @id @default(cuid())
+  name        String
+  kind        ModuleKind @default(CAMPAIGN)
+  description String?    @db.Text
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  items ContentItem[]
+}
+
+// A single piece of content. Every item should trace back to evidence.
+model ContentItem {
+  id        String         @id @default(cuid())
+  title     String
+  channel   ContentChannel @default(LINKEDIN)
+  status    ContentStatus  @default(DRAFT)
+  format    String?
+  summary   String?        @db.Text
+  body      String         @db.Text @default("")
+  pillarTags QoOPillar[]
+
+  moduleId  String?
+  module    ContentModule? @relation(fields: [moduleId], references: [id], onDelete: SetNull)
+  sortOrder Int            @default(0)
+
+  // Repurposing: this item was derived from a source item.
+  sourceItemId String?
+  sourceItem   ContentItem?  @relation("Repurpose", fields: [sourceItemId], references: [id], onDelete: SetNull)
+  derivatives  ContentItem[] @relation("Repurpose")
+
+  evidence EvidenceRecord[] @relation("ContentEvidence")
+  cards    CallingCard[]    @relation("ContentCards")
+
+  publishedUrl String?
+  publishedAt  DateTime?
+  scheduledFor DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([status])
+  @@index([channel])
+  @@index([moduleId])
 }
 
 // Hard guardrail: phrases that fail draft/card validation on sight.

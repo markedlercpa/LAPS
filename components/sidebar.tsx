@@ -14,6 +14,7 @@ import {
   Vault,
   Megaphone,
   Radio,
+  PenLine,
   LogOut,
 } from "lucide-react";
 import { cn, initials } from "@/lib/utils";
@@ -40,6 +41,7 @@ const MODULES = [
       { href: "/echo", label: "Overview", icon: Radio },
       { href: "/echo/evidence", label: "Evidence", icon: Vault },
       { href: "/echo/calling-cards", label: "Calling Cards", icon: Megaphone },
+      { href: "/echo/content", label: "Housed Content", icon: PenLine },
     ],
   },
 ];

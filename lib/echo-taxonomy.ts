@@ -5,6 +5,9 @@ import type {
   Consent,
   CardCategory,
   CardStatus,
+  ContentChannel,
+  ContentStatus,
+  ModuleKind,
 } from "@prisma/client";
 
 /** ECHO shared taxonomy — client-safe (no prisma). */
@@ -98,4 +101,61 @@ export const CARD_STATUS_LABELS: Record<CardStatus, string> = {
   CANDIDATE: "Candidate",
   ACTIVE: "Active",
   RETIRED: "Retired",
+};
+
+// ── H — Housed Content ────────────────────────────────────────────────────
+export const CONTENT_CHANNELS: ContentChannel[] = [
+  "LINKEDIN",
+  "X",
+  "EMAIL",
+  "NEWSLETTER",
+  "BLOG",
+  "YOUTUBE",
+  "PODCAST",
+  "WEBSITE",
+  "BOOK",
+  "OTHER",
+];
+export const CONTENT_CHANNEL_LABELS: Record<ContentChannel, string> = {
+  LINKEDIN: "LinkedIn",
+  X: "X / Twitter",
+  EMAIL: "Email",
+  NEWSLETTER: "Newsletter",
+  BLOG: "Blog",
+  YOUTUBE: "YouTube",
+  PODCAST: "Podcast",
+  WEBSITE: "Website",
+  BOOK: "Book",
+  OTHER: "Other",
+};
+
+export const CONTENT_STATUSES: ContentStatus[] = [
+  "DRAFT",
+  "REVIEW",
+  "SCHEDULED",
+  "PUBLISHED",
+  "ARCHIVED",
+];
+export const CONTENT_STATUS_LABELS: Record<ContentStatus, string> = {
+  DRAFT: "Draft",
+  REVIEW: "In review",
+  SCHEDULED: "Scheduled",
+  PUBLISHED: "Published",
+  ARCHIVED: "Archived",
+};
+export const CONTENT_STATUS_TAG: Record<ContentStatus, string> = {
+  DRAFT: "tag-neutral",
+  REVIEW: "tag-outline",
+  SCHEDULED: "tag-outline",
+  PUBLISHED: "tag-accent",
+  ARCHIVED: "tag-neutral",
+};
+
+export const MODULE_KINDS: ModuleKind[] = ["BOOK", "CAMPAIGN", "SERIES", "COURSE", "OTHER"];
+export const MODULE_KIND_LABELS: Record<ModuleKind, string> = {
+  BOOK: "Book",
+  CAMPAIGN: "Campaign",
+  SERIES: "Series",
+  COURSE: "Course",
+  OTHER: "Other",
 };
