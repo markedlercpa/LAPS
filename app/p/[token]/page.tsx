@@ -2,9 +2,11 @@ import { notFound } from "next/navigation";
 import type { PaymentScheduleType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { stripeConfigured } from "@/lib/stripe";
 import { ViewRecorder } from "./view-recorder";
 import { SignProposal } from "./sign-proposal";
 import { PrintButton } from "./print-button";
+import { PaymentConfirmer } from "./payment-confirmer";
 
 export const dynamic = "force-dynamic";
 
@@ -17,10 +19,13 @@ const SCHEDULE_LABELS: Record<PaymentScheduleType, string> = {
 
 export default async function PublicProposalPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>;
+  searchParams: Promise<{ session_id?: string; canceled?: string }>;
 }) {
   const { token } = await params;
+  const { session_id: sessionId, canceled } = await searchParams;
 
   // Select ONLY client-safe fields — never estimatedDeliveryCost / margin.
   const proposal = await prisma.proposal.findUnique({
@@ -37,6 +42,9 @@ export default async function PublicProposalPage({
       signerName: true,
       signedAt: true,
       lostReason: true,
+      paymentStatus: true,
+      amountPaid: true,
+      paidAt: true,
       lead: { select: { firstName: true, lastName: true, companyName: true, email: true } },
       owner: { select: { name: true } },
       lineItems: {
@@ -64,9 +72,16 @@ export default async function PublicProposalPage({
   const isDeclined = proposal.status === "LOST";
   const canSign = !isSigned && !isDeclined;
 
+  const depositAmount = Number(proposal.payments[0]?.amount ?? 0);
+  const paymentRequired = stripeConfigured() && depositAmount > 0;
+  const isPaid = proposal.paymentStatus === "PAID";
+  // On return from Stripe with a session id, confirm the payment before showing.
+  const confirming = Boolean(sessionId) && !isPaid;
+
   return (
     <div className="min-h-screen bg-bg">
-      {canSign && <ViewRecorder token={token} />}
+      {canSign && !sessionId && <ViewRecorder token={token} />}
+      {sessionId && !isPaid && <PaymentConfirmer token={token} sessionId={sessionId} />}
 
       <div className="mx-auto w-full max-w-[820px] px-6 py-10">
         {/* Masthead */}
@@ -81,13 +96,27 @@ export default async function PublicProposalPage({
         </div>
 
         {/* Status banners */}
+        {confirming && (
+          <div className="mt-6 border-2 border-divider bg-surface px-5 py-4 no-print">
+            <div className="micro-label">Confirming payment…</div>
+            <div className="mt-1 text-[15px] text-muted">
+              We&apos;re confirming your deposit — this only takes a moment.
+            </div>
+          </div>
+        )}
         {isSigned && (
           <div className="mt-6 border-2 border-accent bg-accent px-5 py-4 text-bg">
             <div className="micro-label text-bg/80">Signed</div>
             <div className="mt-1 text-[15px]">
               Accepted{proposal.signerName ? ` by ${proposal.signerName}` : ""}
-              {proposal.signedAt ? ` on ${formatDate(proposal.signedAt)}` : ""}. Thank you — a
-              copy has been recorded and our team will be in touch to begin onboarding.
+              {proposal.signedAt ? ` on ${formatDate(proposal.signedAt)}` : ""}.
+              {isPaid
+                ? ` Deposit of ${formatCurrency(Number(proposal.amountPaid ?? 0))} paid${
+                    proposal.paidAt ? ` on ${formatDate(proposal.paidAt)}` : ""
+                  }.`
+                : ""}{" "}
+              Thank you — a copy has been recorded and our team will be in touch to begin
+              onboarding.
             </div>
           </div>
         )}
@@ -96,6 +125,14 @@ export default async function PublicProposalPage({
             <div className="micro-label">Declined</div>
             <div className="mt-1 text-[15px] text-muted">
               This proposal has been marked declined. If this was a mistake, please contact us.
+            </div>
+          </div>
+        )}
+        {canSign && canceled && !confirming && (
+          <div className="mt-6 border-2 border-divider bg-surface px-5 py-4 no-print">
+            <div className="micro-label">Payment canceled</div>
+            <div className="mt-1 text-[15px] text-muted">
+              No payment was taken. You can review and sign again below whenever you&apos;re ready.
             </div>
           </div>
         )}
@@ -207,7 +244,7 @@ export default async function PublicProposalPage({
         )}
 
         {/* Sign */}
-        {canSign && (
+        {canSign && !confirming && (
           <section className="mt-10">
             <SignProposal
               token={token}
@@ -215,6 +252,8 @@ export default async function PublicProposalPage({
                 .filter(Boolean)
                 .join(" ")}
               defaultEmail={proposal.lead.email ?? ""}
+              depositAmount={depositAmount}
+              paymentRequired={paymentRequired}
             />
           </section>
         )}

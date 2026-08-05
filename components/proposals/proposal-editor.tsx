@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Send, Copy, Check } from "lucide-react";
-import type { ProposalStatus, PaymentScheduleType } from "@prisma/client";
+import type { ProposalStatus, PaymentScheduleType, PaymentStatus } from "@prisma/client";
 import { MicroLabel } from "@/components/micro-label";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
 import {
@@ -31,6 +31,7 @@ const SCHEDULE_TYPES: { value: PaymentScheduleType; label: string }[] = [
 export function ProposalEditor({
   proposal,
   shareUrl,
+  stripeEnabled,
 }: {
   proposal: {
     id: string;
@@ -45,11 +46,15 @@ export function ProposalEditor({
     viewedAt: string | null;
     signedAt: string | null;
     signerName: string | null;
+    paymentStatus: PaymentStatus;
+    amountPaid: number | null;
+    paidAt: string | null;
     lineItems: LineItem[];
     payments: Payment[];
     leadHasEmail: boolean;
   };
   shareUrl: string | null;
+  stripeEnabled: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -82,6 +87,8 @@ export function ProposalEditor({
   const margin = contractValue - deliveryNum;
   const marginPct = contractValue > 0 ? (margin / contractValue) * 100 : 0;
   const scheduledTotal = proposal.payments.reduce((s, p) => s + p.amount, 0);
+  const depositAmount = proposal.payments[0]?.amount ?? 0;
+  const collectsDeposit = stripeEnabled && depositAmount > 0;
   const locked = proposal.status === "WON" || proposal.status === "LOST";
 
   const saveDelivery = () =>
@@ -425,6 +432,13 @@ export function ProposalEditor({
                 This lead has no email — sending generates a link you can copy and share.
               </p>
             )}
+            <p className="mt-2 text-[12px] text-muted">
+              {collectsDeposit
+                ? `Client pays a ${formatCurrency(depositAmount)} deposit at signing via Stripe — required to finalize.`
+                : stripeEnabled
+                  ? "Add a payment-schedule row to collect a deposit at signing."
+                  : "Stripe not connected — proposals sign without collecting payment."}
+            </p>
           </>
         ) : (
           <p className="mt-3 text-[13px] text-muted">
@@ -452,6 +466,16 @@ export function ProposalEditor({
             label={proposal.signerName ? `Signed by ${proposal.signerName}` : "Signed"}
             date={proposal.signedAt}
           />
+          {collectsDeposit && (
+            <TimelineRow
+              label={
+                proposal.paymentStatus === "PAID"
+                  ? `Deposit paid (${formatCurrency(proposal.amountPaid ?? depositAmount)})`
+                  : `Deposit due (${formatCurrency(depositAmount)})`
+              }
+              date={proposal.paidAt}
+            />
+          )}
         </div>
 
         {/* Internal margin */}
@@ -513,8 +537,8 @@ export function ProposalEditor({
 
         <hr className="hr" />
         <p className="text-[12px] text-muted">
-          Payment collection (Stripe) and QBO invoicing arrive in a later phase — the schedule
-          above is captured and shown to the client now.
+          The first schedule row is collected as a Stripe deposit at signing. Later installments
+          and QBO invoicing arrive in a following phase.
         </p>
       </div>
     </div>

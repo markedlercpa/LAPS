@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { markProposalWon } from "@/lib/proposals";
+import { markProposalWon, finalizeDepositPaid } from "@/lib/proposals";
+import { stripeConfigured, getStripe } from "@/lib/stripe";
 
 /**
  * Public (unauthenticated) proposal actions. The opaque `publicToken` in the URL
@@ -20,6 +21,22 @@ async function clientMeta() {
     null;
   const userAgent = h.get("user-agent") || null;
   return { ip, userAgent };
+}
+
+function appBaseUrl() {
+  return (
+    process.env.AUTH_URL ??
+    process.env.NEXTAUTH_URL ??
+    "http://localhost:3000"
+  ).replace(/\/$/, "");
+}
+
+function finalizeRevalidate(token: string, proposalId: string) {
+  revalidatePath(`/p/${token}`);
+  revalidatePath(`/proposals/${proposalId}`);
+  revalidatePath("/proposals");
+  revalidatePath("/sales");
+  revalidatePath("/pipeline");
 }
 
 /** Record that the client opened the proposal; bump SENT -> VIEWED once. */
@@ -48,7 +65,12 @@ const signSchema = z.object({
   signerEmail: z.string().email().optional().or(z.literal("")),
 });
 
-/** Client clicks to sign: capture the signature + audit trail and win the deal. */
+/**
+ * Client clicks to sign. Captures the signature/audit trail, then:
+ *  - if a deposit is due and Stripe is configured, creates a Checkout Session and
+ *    returns its URL — the deal is only finalized once payment completes; or
+ *  - otherwise (no deposit / Stripe off) finalizes immediately (sign-only).
+ */
 export async function signProposal(token: string, input: unknown) {
   const parsed = signSchema.safeParse(input);
   if (!parsed.success) {
@@ -56,28 +78,99 @@ export async function signProposal(token: string, input: unknown) {
   }
   const proposal = await prisma.proposal.findUnique({
     where: { publicToken: token },
-    select: { id: true, status: true },
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      payments: {
+        orderBy: { sortOrder: "asc" },
+        take: 1,
+        select: { amount: true, description: true },
+      },
+      lead: { select: { email: true } },
+    },
   });
   if (!proposal) return { ok: false, error: "Not found" };
   if (proposal.status === "LOST") {
     return { ok: false, error: "This proposal is no longer available to sign." };
   }
+  if (proposal.status === "WON") return { ok: true };
 
   const { ip, userAgent } = await clientMeta();
+  const signerEmail = parsed.data.signerEmail || null;
+
+  // Hold the pending signature on the proposal (finalized on payment / immediately).
+  await prisma.proposal.update({
+    where: { id: proposal.id },
+    data: {
+      signerName: parsed.data.signerName,
+      signerEmail,
+      signedIp: ip,
+      signedUserAgent: userAgent,
+    },
+  });
+
+  const deposit = Number(proposal.payments[0]?.amount ?? 0);
+
+  if (stripeConfigured() && deposit > 0) {
+    const stripe = getStripe();
+    if (!stripe) return { ok: false, error: "Payments are temporarily unavailable." };
+    const base = appBaseUrl();
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: "usd",
+            unit_amount: Math.round(deposit * 100),
+            product_data: {
+              name: `${proposal.title} — ${proposal.payments[0]?.description ?? "Deposit"}`,
+            },
+          },
+        },
+      ],
+      customer_email: signerEmail || proposal.lead.email || undefined,
+      metadata: { proposalId: proposal.id, token },
+      success_url: `${base}/p/${token}?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${base}/p/${token}?canceled=1`,
+    });
+    await prisma.proposal.update({
+      where: { id: proposal.id },
+      data: { stripeSessionId: session.id, paymentStatus: "PENDING" },
+    });
+    revalidatePath(`/proposals/${proposal.id}`);
+    return { ok: true, redirectUrl: session.url ?? undefined };
+  }
+
+  // No deposit due / Stripe not configured → finalize now.
   const res = await markProposalWon(proposal.id, {
     name: parsed.data.signerName,
-    email: parsed.data.signerEmail || null,
+    email: signerEmail,
     ip,
     userAgent,
   });
   if (!res.ok) return res;
 
-  revalidatePath(`/p/${token}`);
-  revalidatePath(`/proposals/${proposal.id}`);
-  revalidatePath("/proposals");
-  revalidatePath("/sales");
-  revalidatePath("/pipeline");
+  finalizeRevalidate(token, proposal.id);
   return { ok: true };
+}
+
+/** Confirm the deposit payment on return from Stripe Checkout (idempotent). */
+export async function confirmPayment(token: string, sessionId: string) {
+  const proposal = await prisma.proposal.findUnique({
+    where: { publicToken: token },
+    select: { id: true, stripeSessionId: true },
+  });
+  if (!proposal) return { ok: false, error: "Not found" };
+  // Only confirm the session we created for this proposal.
+  if (proposal.stripeSessionId && proposal.stripeSessionId !== sessionId) {
+    return { ok: false, error: "Session mismatch" };
+  }
+
+  const res = await finalizeDepositPaid(sessionId);
+  if (res.ok) finalizeRevalidate(token, proposal.id);
+  return res;
 }
 
 const declineSchema = z.object({

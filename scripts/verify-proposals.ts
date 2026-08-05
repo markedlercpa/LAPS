@@ -5,6 +5,7 @@
  */
 import { prisma } from "../lib/prisma";
 import { markProposalWon } from "../lib/proposals";
+import { stripeConfigured, getStripe } from "../lib/stripe";
 import { ONBOARDING_CHECKLIST_TEMPLATE } from "../lib/constants";
 import { randomUUID } from "crypto";
 
@@ -112,6 +113,14 @@ async function main() {
   await markProposalWon(proposal.id, { name: "Jane A. Client" });
   const handoffs = await prisma.handoff.count({ where: { proposalId: proposal.id } });
   assert(handoffs === 1, "re-signing does not duplicate the handoff");
+
+  // Stripe gating: without a key, the app runs sign-only (no deposit blocking).
+  assert(stripeConfigured() === false, "stripe not configured locally (sign-only fallback)");
+  assert(getStripe() === null, "getStripe() returns null without a secret key");
+  assert(
+    after!.paymentStatus === "NONE",
+    "sign-only path leaves paymentStatus NONE (no deposit collected)",
+  );
 
   // Cleanup (cascades remove line items, payments, handoff, checklist).
   await prisma.proposal.delete({ where: { id: proposal.id } });

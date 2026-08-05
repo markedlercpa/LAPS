@@ -3,15 +3,20 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { signProposal, declineProposal } from "./actions";
+import { formatCurrency } from "@/lib/utils";
 
 export function SignProposal({
   token,
   defaultName,
   defaultEmail,
+  depositAmount = 0,
+  paymentRequired = false,
 }: {
   token: string;
   defaultName?: string;
   defaultEmail?: string;
+  depositAmount?: number;
+  paymentRequired?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -30,8 +35,16 @@ export function SignProposal({
     }
     startTransition(async () => {
       const res = await signProposal(token, { signerName: name, signerEmail: email });
-      if (!res.ok) setError(res.error ?? "Could not sign. Please try again.");
-      else router.refresh();
+      if (!res.ok) {
+        setError(res.error ?? "Could not sign. Please try again.");
+        return;
+      }
+      if (res.redirectUrl) {
+        // Off to Stripe Checkout to pay the deposit; the deal finalizes on return.
+        window.location.href = res.redirectUrl;
+        return;
+      }
+      router.refresh();
     });
   };
 
@@ -49,8 +62,13 @@ export function SignProposal({
       <div className="micro-label">Accept &amp; sign</div>
       <h3 className="mt-2">Ready to get started?</h3>
       <p className="text-muted mb-4">
-        Type your full legal name below and click Accept &amp; Sign. Your name, the date, and
-        your device details are recorded as your electronic signature.
+        Type your full legal name below and confirm. Your name, the date, and your device
+        details are recorded as your electronic signature.
+        {paymentRequired
+          ? ` You'll then be taken to secure Stripe checkout to pay the ${formatCurrency(
+              depositAmount,
+            )} deposit — the proposal is finalized once payment completes.`
+          : ""}
       </p>
 
       <div className="field space-y-3" style={{ maxWidth: 460 }}>
@@ -93,7 +111,11 @@ export function SignProposal({
 
       <div className="mt-5 flex flex-wrap gap-2">
         <button className="btn btn-primary" onClick={submit} disabled={pending}>
-          {pending ? "Submitting…" : "Accept & Sign"}
+          {pending
+            ? "Submitting…"
+            : paymentRequired
+              ? `Accept, Sign & Pay ${formatCurrency(depositAmount)}`
+              : "Accept & Sign"}
         </button>
         {!declining ? (
           <button

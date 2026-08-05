@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/lib/prisma";
+import { stripeConfigured } from "@/lib/stripe";
 import { Button } from "@/components/ui/button";
 import { ProposalStatusBadge } from "@/components/status-badge";
 import { ProposalEditor } from "@/components/proposals/proposal-editor";
@@ -65,6 +66,7 @@ export default async function ProposalDetailPage({
 
       <ProposalEditor
         shareUrl={shareUrl}
+        stripeEnabled={stripeConfigured()}
         proposal={{
           id: proposal.id,
           status: proposal.status,
@@ -78,6 +80,9 @@ export default async function ProposalDetailPage({
           viewedAt: proposal.viewedAt?.toISOString() ?? null,
           signedAt: proposal.signedAt?.toISOString() ?? null,
           signerName: proposal.signerName,
+          paymentStatus: proposal.paymentStatus,
+          amountPaid: proposal.amountPaid != null ? Number(proposal.amountPaid) : null,
+          paidAt: proposal.paidAt?.toISOString() ?? null,
           leadHasEmail: Boolean(proposal.lead.email),
           lineItems: proposal.lineItems.map((li) => ({
             id: li.id,

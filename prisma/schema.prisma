@@ -219,6 +219,12 @@ enum PaymentScheduleType {
   RECURRING
 }
 
+enum PaymentStatus {
+  NONE
+  PENDING
+  PAID
+}
+
 model Proposal {
   id                   String         @id @default(cuid())
   hubspotId            String?        @unique
@@ -250,6 +256,13 @@ model Proposal {
   // Payment schedule (stored + displayed now; collection wired in a later phase)
   paymentScheduleType PaymentScheduleType @default(ONE_TIME)
   recurringInterval   String?
+
+  // Stripe deposit collection at signing
+  paymentStatus         PaymentStatus @default(NONE)
+  amountPaid            Decimal?      @db.Decimal(12, 2)
+  paidAt                DateTime?
+  stripeSessionId       String?       @unique
+  stripePaymentIntentId String?
 
   lead      Lead                @relation(fields: [leadId], references: [id], onDelete: Cascade)
   owner     User?               @relation("ProposalOwner", fields: [ownerId], references: [id], onDelete: SetNull)

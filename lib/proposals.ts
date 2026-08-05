@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { ONBOARDING_CHECKLIST_TEMPLATE } from "@/lib/constants";
+import { getStripe } from "@/lib/stripe";
 
 export type Signer = {
   name?: string | null;
@@ -69,5 +70,51 @@ export async function markProposalWon(proposalId: string, signer?: Signer) {
     });
   }
 
+  return { ok: true as const };
+}
+
+/**
+ * Confirm a paid Stripe Checkout Session and finalize the proposal: stamp the
+ * payment, complete the signature, and run the WON cascade. Idempotent — safe
+ * for both the success-return confirmation and the webhook to call. Resolves the
+ * proposal from the session's metadata (or its stored session id).
+ */
+export async function finalizeDepositPaid(sessionId: string) {
+  const stripe = getStripe();
+  if (!stripe) return { ok: false as const, error: "Stripe not configured" };
+
+  const session = await stripe.checkout.sessions.retrieve(sessionId);
+  if (session.payment_status !== "paid") {
+    return { ok: false as const, error: "Payment not completed" };
+  }
+
+  const proposalId = session.metadata?.proposalId;
+  const proposal = proposalId
+    ? await prisma.proposal.findUnique({ where: { id: proposalId } })
+    : await prisma.proposal.findUnique({ where: { stripeSessionId: sessionId } });
+  if (!proposal) return { ok: false as const, error: "Proposal not found" };
+
+  const now = new Date();
+  const amountPaid =
+    session.amount_total != null ? session.amount_total / 100 : undefined;
+  const paymentIntentId =
+    typeof session.payment_intent === "string"
+      ? session.payment_intent
+      : (session.payment_intent?.id ?? null);
+
+  await prisma.proposal.update({
+    where: { id: proposal.id },
+    data: {
+      paymentStatus: "PAID",
+      amountPaid: amountPaid ?? proposal.amountPaid ?? undefined,
+      paidAt: proposal.paidAt ?? now,
+      stripePaymentIntentId: paymentIntentId ?? proposal.stripePaymentIntentId,
+      signedAt: proposal.signedAt ?? now,
+    },
+  });
+
+  // Signer fields were captured when the client clicked to sign; the WON cascade
+  // (lead -> CLOSED_WON + onboarding handoff) is idempotent.
+  await markProposalWon(proposal.id);
   return { ok: true as const };
 }
