@@ -2,79 +2,107 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { ExternalLink } from "lucide-react";
 import { MicroLabel } from "@/components/micro-label";
-import { updateDemo } from "@/app/(dashboard)/proposals/actions";
+import { updateDemos } from "@/app/(dashboard)/proposals/actions";
 
 type DemoOption = { key: string; name: string; serviceLine: string };
 
 export function DemoBuilder({
   proposalId,
   locked,
-  demoKey,
+  demoKeys,
   demos,
   onSaved,
 }: {
   proposalId: string;
   locked: boolean;
-  demoKey: string | null;
+  demoKeys: string[];
   demos: DemoOption[];
   onSaved?: (hasDemo: boolean) => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string[]>(demoKeys);
 
-  const changeDemo = (key: string) => {
+  const toggle = (key: string) => {
+    setSelected((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+  };
+
+  const save = () => {
     setMsg(null);
     startTransition(async () => {
-      const res = await updateDemo(proposalId, key);
+      const res = await updateDemos(proposalId, selected);
       if (!res.ok) {
-        setMsg("Failed to attach demo");
+        setMsg("Failed to save");
         return;
       }
-      onSaved?.(Boolean(key));
+      onSaved?.(selected.length > 0);
       router.refresh();
     });
   };
 
   return (
     <div className="border-2 border-ink">
-      <div className="border-b-2 border-ink bg-surface px-4 py-3">
-        <MicroLabel>Demo builder</MicroLabel>
-        <div className="mt-0.5 text-[13px] text-muted">
-          Attach an anonymized sample of our work — required before the proposal unlocks.
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b-2 border-ink bg-surface px-4 py-3">
+        <div>
+          <MicroLabel>Demo builder</MicroLabel>
+          <div className="mt-0.5 text-[13px] text-muted">
+            Include one or more anonymized samples of our work — at least one is required.
+          </div>
         </div>
-      </div>
-      <div className="p-4">
-        <div className="field" style={{ maxWidth: 520 }}>
-          <label>Sample deliverable (shown to the client)</label>
-          <select
-            className="input"
-            value={demoKey ?? ""}
-            disabled={locked || pending}
-            onChange={(e) => changeDemo(e.target.value)}
-          >
-            <option value="">— none (required) —</option>
-            {demos.map((d) => (
-              <option key={d.key} value={d.key}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        {demoKey && (
-          <a
-            className="btn btn-secondary mt-3"
-            href={`/demos/${demoKey}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Preview sample
-          </a>
+        {!locked && (
+          <button className="btn btn-primary" onClick={save} disabled={pending}>
+            Save deliverables
+          </button>
         )}
-        <p className="mt-3 max-w-[520px] text-[12px] text-muted">
-          Auto-attached from the template by service line; change it here if needed. Use
-          anonymized samples only — never a real client&apos;s data.
+      </div>
+
+      <div className="p-4">
+        <div className="space-y-2">
+          {demos.map((d) => {
+            const on = selected.includes(d.key);
+            return (
+              <div
+                key={d.key}
+                className={`flex items-center justify-between gap-3 border p-3 ${
+                  on ? "border-ink bg-surface" : "border-divider"
+                }`}
+              >
+                <label className="flex flex-1 items-center gap-3" style={{ cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    disabled={locked || pending}
+                    onChange={() => toggle(d.key)}
+                  />
+                  <span className="text-[14px]">
+                    <span className="font-heading font-extrabold">{d.name}</span>
+                    <span className="micro-label ml-2 align-middle text-accent">
+                      {d.serviceLine}
+                    </span>
+                  </span>
+                </label>
+                <a
+                  className="btn btn-ghost btn-sm"
+                  href={`/demo/${d.key}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  Open
+                </a>
+              </div>
+            );
+          })}
+        </div>
+        <p className="mt-3 max-w-[560px] text-[12px] text-muted">
+          Each sample opens as a printable PDF (open in a new tab, then Print / Save as PDF).
+          Auto-selected from the template by service line; add or remove here. Anonymized
+          samples only — never a real client&apos;s data.
         </p>
         {msg && <p className="mt-2 text-[14px] text-accent-700">{msg}</p>}
       </div>

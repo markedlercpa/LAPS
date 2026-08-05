@@ -162,7 +162,7 @@ export async function applyProposalTemplate(proposalId: string, templateKey: str
         paymentScheduleType: template.paymentScheduleType,
         recurringInterval: template.recurringInterval,
         // Auto-attach the matching sample deliverable for this service line.
-        ...(template.demoKey ? { demoKey: template.demoKey } : {}),
+        ...(template.demoKey ? { demoKeys: [template.demoKey] } : {}),
         ...(template.defaultDeliveryCost != null
           ? { estimatedDeliveryCost: template.defaultDeliveryCost }
           : {}),
@@ -208,7 +208,7 @@ export async function sendProposalCore(proposalId: string, actorUserId: string |
       error: "Complete the scoping card (estimated hours) before sending.",
     };
   }
-  if (!proposal.demoKey) {
+  if (proposal.demoKeys.length === 0) {
     return {
       ok: false as const,
       error: "Attach a sample deliverable (demo) before sending.",
@@ -263,7 +263,7 @@ export type ProposalFieldPatch = {
   estimatedDeliveryCost?: number;
   paymentScheduleType?: PaymentScheduleType;
   recurringInterval?: string;
-  demoKey?: string;
+  demoKeys?: string[];
   lineItems?: TemplateLineItem[];
   payments?: TemplatePayment[];
 };
@@ -284,7 +284,7 @@ export async function applyProposalFields(proposalId: string, patch: ProposalFie
   if (patch.paymentScheduleType !== undefined)
     data.paymentScheduleType = patch.paymentScheduleType;
   if (patch.recurringInterval !== undefined) data.recurringInterval = patch.recurringInterval;
-  if (patch.demoKey !== undefined) data.demoKey = patch.demoKey || null;
+  if (patch.demoKeys !== undefined) data.demoKeys = patch.demoKeys;
   if (Object.keys(data).length) {
     await prisma.proposal.update({ where: { id: proposalId }, data });
   }
@@ -340,7 +340,7 @@ export async function getProposalSummary(id: string) {
     title: p.title,
     status: p.status,
     scoped: scope.computed.budgetCost > 0,
-    demoKey: p.demoKey,
+    demoKeys: p.demoKeys,
     scoping: {
       markupEnabled: scope.markupEnabled,
       markupPct: scope.markupPct,

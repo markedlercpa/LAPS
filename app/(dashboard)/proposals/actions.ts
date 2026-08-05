@@ -162,11 +162,11 @@ export async function updateScoping(proposalId: string, input: unknown) {
   return { ok: true as const };
 }
 
-/** Attach (or change) the sample deliverable shown to the client. */
-export async function updateDemo(proposalId: string, demoKey: string) {
+/** Set the sample deliverables (demos) shown to the client. */
+export async function updateDemos(proposalId: string, demoKeys: string[]) {
   await prisma.proposal.update({
     where: { id: proposalId },
-    data: { demoKey: demoKey || null },
+    data: { demoKeys },
   });
   revalidatePath(`/proposals/${proposalId}`);
   return { ok: true as const };

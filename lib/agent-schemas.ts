@@ -36,8 +36,8 @@ export const proposalFieldsSchema = z.object({
   scoping: z.array(scopeLineSchema).optional(),
   salesMarkupEnabled: z.boolean().optional(),
   salesMarkupPct: z.number().min(0).optional(),
-  // Sample deliverable (demo) shown to the client — required before sending.
-  demoKey: z.string().optional(),
+  // Sample deliverables (demos) shown to the client — at least one required to send.
+  demoKeys: z.array(z.string()).optional(),
 });
 
 export const createProposalSchema = proposalFieldsSchema.extend({

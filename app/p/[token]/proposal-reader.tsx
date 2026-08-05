@@ -47,14 +47,14 @@ export function ProposalReader({
   token,
   proposal,
   brochure,
-  demo,
+  demos,
   flags,
   sessionId,
 }: {
   token: string;
   proposal: ReaderProposal;
   brochure: BrochureContent;
-  demo: DemoContent | null;
+  demos: DemoContent[];
   flags: {
     paymentRequired: boolean;
     depositAmount: number;
@@ -158,8 +158,32 @@ export function ProposalReader({
             <BrochurePanel brochure={brochure} />
           </Panel>
           <Panel show={active === 2}>
-            {demo ? (
-              <DemoArtifact demo={demo} />
+            {demos.length > 0 ? (
+              <div className="space-y-12">
+                {demos.map((d) => (
+                  <div key={d.key}>
+                    <div className="no-print mb-3 flex flex-wrap gap-2">
+                      <a
+                        className="btn btn-secondary"
+                        href={`/demo/${d.key}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open in new tab
+                      </a>
+                      <a
+                        className="btn btn-secondary"
+                        href={`/demo/${d.key}?print=1`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Download PDF
+                      </a>
+                    </div>
+                    <DemoArtifact demo={d} />
+                  </div>
+                ))}
+              </div>
             ) : (
               <div className="text-muted">A sample of our work will appear here.</div>
             )}

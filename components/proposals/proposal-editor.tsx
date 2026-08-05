@@ -41,7 +41,7 @@ export function ProposalEditor({
   shareUrl,
   stripeEnabled,
   scoped,
-  demoKey,
+  demoKeys,
   templates,
   snippets,
 }: {
@@ -68,7 +68,7 @@ export function ProposalEditor({
   shareUrl: string | null;
   stripeEnabled: boolean;
   scoped: boolean;
-  demoKey: string | null;
+  demoKeys: string[];
   templates: TemplateOption[];
   snippets: SnippetOption[];
 }) {
@@ -122,7 +122,7 @@ export function ProposalEditor({
 
   // Mirror the server-side send guard so the button state matches reality.
   const missingLineItems = proposal.lineItems.length === 0;
-  const hasDemo = Boolean(demoKey);
+  const hasDemo = demoKeys.length > 0;
   const canSend = scoped && hasDemo && !missingLineItems;
   const sendBlockedReason = !scoped
     ? "Complete the scoping card (estimated hours) to send."

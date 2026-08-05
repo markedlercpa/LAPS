@@ -34,7 +34,7 @@ export default async function PublicProposalPage({
       paymentStatus: true,
       amountPaid: true,
       paidAt: true,
-      demoKey: true,
+      demoKeys: true,
       lead: { select: { firstName: true, lastName: true, companyName: true, email: true } },
       owner: { select: { name: true } },
       lineItems: {
@@ -51,7 +51,9 @@ export default async function PublicProposalPage({
   if (!proposal) notFound();
 
   const brochure = await getBrochure();
-  const demo = proposal.demoKey ? await getDemo(proposal.demoKey) : null;
+  const demos = (await Promise.all(proposal.demoKeys.map((k) => getDemo(k)))).filter(
+    (d): d is NonNullable<typeof d> => d !== null,
+  );
 
   const clientName =
     proposal.lead.companyName ||
@@ -64,7 +66,7 @@ export default async function PublicProposalPage({
       token={token}
       sessionId={sessionId}
       brochure={brochure}
-      demo={demo}
+      demos={demos}
       flags={{
         paymentRequired: stripeConfigured() && depositAmount > 0,
         depositAmount,

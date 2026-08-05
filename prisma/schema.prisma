@@ -285,8 +285,8 @@ model Proposal {
   salesMarkupEnabled Boolean @default(false)
   salesMarkupPct     Decimal @default(0) @db.Decimal(6, 2)
 
-  // Demo deliverable shown to the client (gate: required before sending)
-  demoKey String?
+  // Demo deliverables shown to the client (gate: at least one required to send)
+  demoKeys String[] @default([])
 
   lead         Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
   owner        User?              @relation("ProposalOwner", fields: [ownerId], references: [id], onDelete: SetNull)

@@ -89,7 +89,7 @@ export default async function ProposalDetailPage({
 
       <ProposalWorkspace
         scoped={scoped}
-        hasDemo={Boolean(proposal.demoKey)}
+        hasDemo={proposal.demoKeys.length > 0}
         scopingProps={{
           proposalId: proposal.id,
           locked,
@@ -102,14 +102,14 @@ export default async function ProposalDetailPage({
         demoProps={{
           proposalId: proposal.id,
           locked,
-          demoKey: proposal.demoKey,
+          demoKeys: proposal.demoKeys,
           demos: demoOptions,
         }}
         editorProps={{
           shareUrl,
           stripeEnabled: stripeConfigured(),
           scoped,
-          demoKey: proposal.demoKey,
+          demoKeys: proposal.demoKeys,
           templates,
           snippets,
           proposal: {
