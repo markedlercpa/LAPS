@@ -98,13 +98,31 @@ export const DEFAULT_EVENT_TYPES = [
   },
 ] as const;
 
-/** Seed the standard call options for a host that has none yet (idempotent). */
+/**
+ * Reconcile the standard call options for a host (idempotent). Creates any of
+ * the standard options whose slug is missing, and removes the leftover
+ * auto-seeded "intro-call" if it's untouched (no bookings). Never clobbers a
+ * host's edited/custom event types.
+ */
 export async function ensureStandardEventTypes(hostId: string): Promise<void> {
-  const count = await prisma.bookingEventType.count({ where: { hostId } });
-  if (count > 0) return;
-  await prisma.bookingEventType.createMany({
-    data: DEFAULT_EVENT_TYPES.map((e) => ({ ...e, hostId })),
+  const existing = await prisma.bookingEventType.findMany({
+    where: { hostId },
+    select: { id: true, slug: true, _count: { select: { appointments: true } } },
   });
+  const bySlug = new Map(existing.map((e) => [e.slug, e]));
+
+  const missing = DEFAULT_EVENT_TYPES.filter((e) => !bySlug.has(e.slug));
+  if (missing.length) {
+    await prisma.bookingEventType.createMany({
+      data: missing.map((e) => ({ ...e, hostId })),
+    });
+  }
+
+  // Drop the stale default only when it carries no bookings.
+  const intro = bySlug.get("intro-call");
+  if (intro && intro._count.appointments === 0) {
+    await prisma.bookingEventType.delete({ where: { id: intro.id } });
+  }
 }
 
 type Rule = { weekday: number; startMin: number; endMin: number };
