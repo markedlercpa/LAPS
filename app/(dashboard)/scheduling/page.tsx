@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { ensureHost } from "@/lib/booking";
+import { ensureHost, ensureStandardEventTypes } from "@/lib/booking";
 import { HostSettings } from "@/components/scheduling/host-settings";
 import { AvailabilityEditor } from "@/components/scheduling/availability-editor";
 import { EventTypeManager, type EventTypeData } from "@/components/scheduling/event-type-manager";
@@ -25,6 +25,7 @@ export default async function SchedulingPage() {
   if (!userId) redirect("/signin");
 
   const host = await ensureHost(userId);
+  await ensureStandardEventTypes(host.id);
   const [rules, events] = await Promise.all([
     prisma.availabilityRule.findMany({ where: { hostId: host.id } }),
     prisma.bookingEventType.findMany({ where: { hostId: host.id }, orderBy: { createdAt: "asc" } }),
@@ -43,6 +44,7 @@ export default async function SchedulingPage() {
     bufferAfterMin: e.bufferAfterMin,
     minNoticeMin: e.minNoticeMin,
     rollingDays: e.rollingDays,
+    windowBusinessDays: e.windowBusinessDays,
     maxPerDay: e.maxPerDay,
     active: e.active,
     questions: Array.isArray(e.questions) ? (e.questions as EventTypeData["questions"]) : [],

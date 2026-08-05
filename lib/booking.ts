@@ -59,20 +59,52 @@ export async function ensureHost(userId: string): Promise<BookingHost> {
     })),
   });
 
-  // Seed a default event type.
-  await prisma.bookingEventType.create({
-    data: {
-      hostId: host.id,
-      slug: "intro-call",
-      name: "Intro Call",
-      description: "A quick introductory call.",
-      durationMin: 30,
-      minNoticeMin: 240,
-      rollingDays: 60,
-    },
+  // Seed the standard discovery-call options.
+  await prisma.bookingEventType.createMany({
+    data: DEFAULT_EVENT_TYPES.map((e) => ({ ...e, hostId: host.id })),
   });
 
   return host;
+}
+
+/** The firm's standard call options — a 10-business-day booking window. */
+export const DEFAULT_EVENT_TYPES = [
+  {
+    slug: "buyside-ma-discovery",
+    name: "Buyside M&A Discovery",
+    description: "For buyers exploring an acquisition — goals, mandate, and process.",
+    durationMin: 45,
+    minNoticeMin: 240,
+    rollingDays: 60,
+    windowBusinessDays: 10,
+  },
+  {
+    slug: "business-owner-discovery",
+    name: "Business Owner Discovery Call",
+    description: "For business owners — where you are today and where you want to go.",
+    durationMin: 30,
+    minNoticeMin: 240,
+    rollingDays: 60,
+    windowBusinessDays: 10,
+  },
+  {
+    slug: "sellside-ma-discovery",
+    name: "Sellside M&A Discovery",
+    description: "For owners considering a sale — readiness, timing, and value.",
+    durationMin: 45,
+    minNoticeMin: 240,
+    rollingDays: 60,
+    windowBusinessDays: 10,
+  },
+] as const;
+
+/** Seed the standard call options for a host that has none yet (idempotent). */
+export async function ensureStandardEventTypes(hostId: string): Promise<void> {
+  const count = await prisma.bookingEventType.count({ where: { hostId } });
+  if (count > 0) return;
+  await prisma.bookingEventType.createMany({
+    data: DEFAULT_EVENT_TYPES.map((e) => ({ ...e, hostId })),
+  });
 }
 
 type Rule = { weekday: number; startMin: number; endMin: number };
@@ -97,13 +129,20 @@ export async function computeSlots(opts: {
   bufferAfterMin: number;
   minNoticeMin: number;
   rollingDays: number;
+  windowBusinessDays?: number | null;
   maxPerDay: number | null;
   now?: Date;
   excludeAppointmentId?: string;
 }): Promise<string[]> {
   const now = opts.now ?? new Date();
+  // How many calendar days to scan: a business-day window can span extra
+  // weekend days, so give it headroom; otherwise use the rolling calendar days.
+  const scanDays =
+    opts.windowBusinessDays != null
+      ? opts.windowBusinessDays * 2 + 7
+      : opts.rollingDays;
   const windowStart = new Date(now.getTime() - DAY_MS);
-  const windowEnd = new Date(now.getTime() + (opts.rollingDays + 1) * DAY_MS);
+  const windowEnd = new Date(now.getTime() + (scanDays + 1) * DAY_MS);
 
   // Busy: existing LAPS bookings for this host.
   const appts = await prisma.appointment.findMany({
@@ -156,13 +195,20 @@ export async function computeSlots(opts: {
   const gp = (t: string) => Number(startParts.find((p) => p.type === t)?.value);
   const floatBase = Date.UTC(gp("year"), gp("month") - 1, gp("day"));
 
-  for (let i = 0; i <= opts.rollingDays; i++) {
+  let businessDaysSeen = 0;
+  for (let i = 0; i <= scanDays; i++) {
     const dayFloat = new Date(floatBase + i * DAY_MS);
     const Y = dayFloat.getUTCFullYear();
     const M = dayFloat.getUTCMonth(); // 0-11
     const D = dayFloat.getUTCDate();
     const weekday = dayFloat.getUTCDay();
     const dayKey = `${Y}-${M}-${D}`;
+
+    // Business-day window: stop once we've passed the Nth business day (Mon–Fri).
+    if (opts.windowBusinessDays != null) {
+      if (weekday >= 1 && weekday <= 5) businessDaysSeen++;
+      if (businessDaysSeen > opts.windowBusinessDays) break;
+    }
 
     // Windows for the day: override wins, else weekly rules.
     let windows: { startMin: number; endMin: number }[];
@@ -285,6 +331,7 @@ export async function createBooking(input: {
     bufferAfterMin: event.bufferAfterMin,
     minNoticeMin: event.minNoticeMin,
     rollingDays: event.rollingDays,
+    windowBusinessDays: event.windowBusinessDays,
     maxPerDay: event.maxPerDay,
   });
   if (!slots.includes(input.startISO)) {
@@ -488,6 +535,7 @@ export async function rescheduleBooking(token: string, newStartISO: string) {
     bufferAfterMin: event.bufferAfterMin,
     minNoticeMin: event.minNoticeMin,
     rollingDays: event.rollingDays,
+    windowBusinessDays: event.windowBusinessDays,
     maxPerDay: event.maxPerDay,
     excludeAppointmentId: appt.id,
   });

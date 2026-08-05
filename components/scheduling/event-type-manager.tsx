@@ -24,6 +24,7 @@ export type EventTypeData = {
   bufferAfterMin: number;
   minNoticeMin: number;
   rollingDays: number;
+  windowBusinessDays: number | null;
   maxPerDay: number | null;
   active: boolean;
   questions: Question[];
@@ -48,6 +49,7 @@ const blank = (): EventTypeData => ({
   bufferAfterMin: 0,
   minNoticeMin: 240,
   rollingDays: 60,
+  windowBusinessDays: 10,
   maxPerDay: null,
   active: true,
   questions: [],
@@ -189,7 +191,11 @@ export function EventTypeManager({
                 <input className="input num" inputMode="numeric" value={editing.minNoticeMin} onChange={(e) => set("minNoticeMin", Number(e.target.value) || 0)} />
               </div>
               <div className="field">
-                <label>Bookable window (days)</label>
+                <label>Window (business days, blank = use calendar)</label>
+                <input className="input num" inputMode="numeric" value={editing.windowBusinessDays ?? ""} placeholder="10" onChange={(e) => set("windowBusinessDays", e.target.value ? Number(e.target.value) : null)} />
+              </div>
+              <div className="field">
+                <label>Window (calendar days)</label>
                 <input className="input num" inputMode="numeric" value={editing.rollingDays} onChange={(e) => set("rollingDays", Number(e.target.value) || 1)} />
               </div>
               <div className="field">

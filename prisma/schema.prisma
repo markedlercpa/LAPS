@@ -778,6 +778,7 @@ model BookingEventType {
   bufferAfterMin  Int                 @default(0)
   minNoticeMin    Int                 @default(240)
   rollingDays     Int                 @default(60)
+  windowBusinessDays Int? // when set, cap the window to N business days (overrides rollingDays)
   maxPerDay       Int?
   color           String?
   active          Boolean             @default(true)

@@ -51,6 +51,7 @@ export default async function BookEventPage({
     bufferAfterMin: event.bufferAfterMin,
     minNoticeMin: event.minNoticeMin,
     rollingDays: event.rollingDays,
+    windowBusinessDays: event.windowBusinessDays,
     maxPerDay: event.maxPerDay,
     excludeAppointmentId: undefined,
   });
