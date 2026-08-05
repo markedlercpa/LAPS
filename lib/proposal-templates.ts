@@ -25,6 +25,7 @@ export type ProposalTemplateSeed = {
   paymentScheduleType: PaymentScheduleType;
   recurringInterval?: string;
   defaultDeliveryCost?: number;
+  demoKey?: string;
   lineItems: TemplateLineItem[];
   payments: TemplatePayment[];
   sortOrder: number;
@@ -45,6 +46,7 @@ export const PROPOSAL_TEMPLATES: ProposalTemplateSeed[] = [
     paymentScheduleType: "RECURRING",
     recurringInterval: "Monthly",
     defaultDeliveryCost: 1200,
+    demoKey: "demo-cas",
     lineItems: [{ description: "Monthly client accounting services", quantity: 1, unitPrice: 2500 }],
     payments: [{ description: "First month due on signing", amount: 2500, dueOn: "On signing" }],
     sortOrder: 0,
@@ -62,6 +64,7 @@ export const PROPOSAL_TEMPLATES: ProposalTemplateSeed[] = [
       "Fees are due per the schedule below. Returns are prepared from information provided by the client; we rely on that information without audit. Filing deadlines assume complete information is received at least three weeks before the applicable due date. Extensions may be filed as needed; taxes owed remain due by the statutory deadline.",
     paymentScheduleType: "DEPOSIT_THEN_BALANCE",
     defaultDeliveryCost: 1800,
+    demoKey: "demo-tax",
     lineItems: [
       { description: "Business & personal return preparation", quantity: 1, unitPrice: 3500 },
       { description: "Year-end tax planning session", quantity: 1, unitPrice: 1000 },
@@ -85,6 +88,7 @@ export const PROPOSAL_TEMPLATES: ProposalTemplateSeed[] = [
       "This is a fixed-fee engagement billed per the schedule below. The analysis relies on data and representations provided by the target and its advisors and does not constitute an audit or attestation. Timeline assumes timely data-room access; scope changes (additional entities, periods, or carve-outs) may adjust the fee with prior agreement.",
     paymentScheduleType: "DEPOSIT_THEN_BALANCE",
     defaultDeliveryCost: 12000,
+    demoKey: "demo-qoe",
     lineItems: [{ description: "Quality of Earnings analysis & databook", quantity: 1, unitPrice: 25000 }],
     payments: [
       { description: "50% deposit on signing", amount: 12500, dueOn: "On signing" },
@@ -106,6 +110,7 @@ export const PROPOSAL_TEMPLATES: ProposalTemplateSeed[] = [
     paymentScheduleType: "RECURRING",
     recurringInterval: "Monthly",
     defaultDeliveryCost: 3000,
+    demoKey: "demo-cfo",
     lineItems: [{ description: "Fractional CFO retainer (monthly)", quantity: 1, unitPrice: 6000 }],
     payments: [{ description: "First month due on signing", amount: 6000, dueOn: "On signing" }],
     sortOrder: 3,
@@ -145,14 +150,8 @@ let seeded = false;
 export async function ensureProposalTemplatesSeeded() {
   if (seeded) return;
   const snippets = sectionSnippetSeeds();
-  const [templateCount, snippetCount] = await Promise.all([
-    prisma.proposalTemplate.count(),
-    prisma.sectionSnippet.count(),
-  ]);
-  if (templateCount >= PROPOSAL_TEMPLATES.length && snippetCount >= snippets.length) {
-    seeded = true;
-    return;
-  }
+  // Always upsert (once per process, gated by `seeded`) so edits to the seed copy
+  // above — including new fields like demoKey — refresh existing rows on deploy.
 
   for (const t of PROPOSAL_TEMPLATES) {
     await prisma.proposalTemplate.upsert({
@@ -167,6 +166,7 @@ export async function ensureProposalTemplatesSeeded() {
         paymentScheduleType: t.paymentScheduleType,
         recurringInterval: t.recurringInterval ?? null,
         defaultDeliveryCost: t.defaultDeliveryCost ?? null,
+        demoKey: t.demoKey ?? null,
         lineItems: t.lineItems,
         payments: t.payments,
         sortOrder: t.sortOrder,
@@ -182,6 +182,7 @@ export async function ensureProposalTemplatesSeeded() {
         paymentScheduleType: t.paymentScheduleType,
         recurringInterval: t.recurringInterval ?? null,
         defaultDeliveryCost: t.defaultDeliveryCost ?? null,
+        demoKey: t.demoKey ?? null,
         lineItems: t.lineItems,
         payments: t.payments,
         sortOrder: t.sortOrder,

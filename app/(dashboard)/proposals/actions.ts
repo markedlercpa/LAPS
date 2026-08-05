@@ -162,6 +162,16 @@ export async function updateScoping(proposalId: string, input: unknown) {
   return { ok: true as const };
 }
 
+/** Attach (or change) the sample deliverable shown to the client. */
+export async function updateDemo(proposalId: string, demoKey: string) {
+  await prisma.proposal.update({
+    where: { id: proposalId },
+    data: { demoKey: demoKey || null },
+  });
+  revalidatePath(`/proposals/${proposalId}`);
+  return { ok: true as const };
+}
+
 /** Prefill this proposal from a full template (replaces sections + line items + schedule). */
 export async function applyTemplate(id: string, templateKey: string) {
   const res = await applyProposalTemplate(id, templateKey);

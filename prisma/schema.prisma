@@ -285,6 +285,9 @@ model Proposal {
   salesMarkupEnabled Boolean @default(false)
   salesMarkupPct     Decimal @default(0) @db.Decimal(6, 2)
 
+  // Demo deliverable shown to the client (gate: required before sending)
+  demoKey String?
+
   lead         Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
   owner        User?              @relation("ProposalOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   lineItems    ProposalLineItem[]
@@ -340,6 +343,7 @@ model ProposalTemplate {
   paymentScheduleType PaymentScheduleType @default(ONE_TIME)
   recurringInterval   String?
   defaultDeliveryCost Decimal?            @db.Decimal(12, 2)
+  demoKey             String?
   lineItems           Json // [{ description, quantity, unitPrice }]
   payments            Json // [{ description, amount, dueOn }]
   sortOrder           Int                 @default(0)
@@ -362,6 +366,22 @@ model SectionSnippet {
   sortOrder Int         @default(0)
 
   @@index([type])
+}
+
+// Firm-level demo library: anonymized SAMPLE deliverables per service line,
+// shown to the client so no proposal goes out without an artifact of the work.
+model DemoTemplate {
+  id            String   @id @default(cuid())
+  key           String   @unique
+  serviceLine   String
+  name          String
+  title         String
+  subtitle      String?
+  metrics       Json // [{ label, value, hint }]
+  tables        Json // [{ title, columns:[...], rows:[[...]] }]
+  narrative     String?  @db.Text
+  isPlaceholder Boolean  @default(true)
+  sortOrder     Int      @default(0)
 }
 
 // Firm-level brochure / social proof shown on the client proposal page. Single

@@ -5,6 +5,8 @@ import { ChevronLeft, ChevronRight, Check } from "lucide-react";
 import type { PaymentScheduleType } from "@prisma/client";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
 import type { BrochureContent } from "@/lib/brochure";
+import type { DemoContent } from "@/lib/demos";
+import { DemoArtifact } from "@/components/demo-artifact";
 import { ViewRecorder } from "./view-recorder";
 import { SignProposal } from "./sign-proposal";
 import { PaymentConfirmer } from "./payment-confirmer";
@@ -45,12 +47,14 @@ export function ProposalReader({
   token,
   proposal,
   brochure,
+  demo,
   flags,
   sessionId,
 }: {
   token: string;
   proposal: ReaderProposal;
   brochure: BrochureContent;
+  demo: DemoContent | null;
   flags: {
     paymentRequired: boolean;
     depositAmount: number;
@@ -70,11 +74,19 @@ export function ProposalReader({
     0,
   );
 
-  const TABS = ["Welcome", "About us", "Your engagement", "Payment & signature", "Next steps"];
-  const NEXT = 4;
+  const TABS = [
+    "Welcome",
+    "About us",
+    "Our work",
+    "Your engagement",
+    "Payment & signature",
+    "Next steps",
+  ];
+  const NEXT = 5;
+  const PAY = 4;
   // Land the client where it makes sense: Next steps once signed, else the
   // payment tab when returning from checkout, else the start.
-  const initial = isSigned ? NEXT : sessionId || canceled ? 3 : 0;
+  const initial = isSigned ? NEXT : sessionId || canceled ? PAY : 0;
   const [active, setActive] = useState(initial);
 
   // When the proposal becomes signed (after the sign action refreshes the page),
@@ -90,7 +102,7 @@ export function ProposalReader({
     if (next >= 0 && next < TABS.length) setActive(next);
   };
   const atStart = active === 0;
-  const lastOpen = isSigned ? NEXT : 3;
+  const lastOpen = isSigned ? NEXT : PAY;
   const atEnd = active >= lastOpen;
 
   return (
@@ -146,9 +158,16 @@ export function ProposalReader({
             <BrochurePanel brochure={brochure} />
           </Panel>
           <Panel show={active === 2}>
-            <ServicesPanel proposal={proposal} contractTotal={contractTotal} />
+            {demo ? (
+              <DemoArtifact demo={demo} />
+            ) : (
+              <div className="text-muted">A sample of our work will appear here.</div>
+            )}
           </Panel>
           <Panel show={active === 3}>
+            <ServicesPanel proposal={proposal} contractTotal={contractTotal} />
+          </Panel>
+          <Panel show={active === PAY}>
             <PaymentPanel
               token={token}
               proposal={proposal}

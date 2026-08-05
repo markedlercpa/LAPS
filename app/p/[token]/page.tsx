@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { stripeConfigured } from "@/lib/stripe";
 import { getBrochure } from "@/lib/brochure";
+import { getDemo } from "@/lib/demos";
 import { ProposalReader } from "./proposal-reader";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +34,7 @@ export default async function PublicProposalPage({
       paymentStatus: true,
       amountPaid: true,
       paidAt: true,
+      demoKey: true,
       lead: { select: { firstName: true, lastName: true, companyName: true, email: true } },
       owner: { select: { name: true } },
       lineItems: {
@@ -49,6 +51,7 @@ export default async function PublicProposalPage({
   if (!proposal) notFound();
 
   const brochure = await getBrochure();
+  const demo = proposal.demoKey ? await getDemo(proposal.demoKey) : null;
 
   const clientName =
     proposal.lead.companyName ||
@@ -61,6 +64,7 @@ export default async function PublicProposalPage({
       token={token}
       sessionId={sessionId}
       brochure={brochure}
+      demo={demo}
       flags={{
         paymentRequired: stripeConfigured() && depositAmount > 0,
         depositAmount,

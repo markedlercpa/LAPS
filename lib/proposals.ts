@@ -5,7 +5,11 @@ import { ONBOARDING_CHECKLIST_TEMPLATE } from "@/lib/constants";
 import { getStripe } from "@/lib/stripe";
 import { graphConfigured, sendMailAsUser } from "@/lib/graph";
 import { isScoped, getScopingView } from "@/lib/scoping";
-import type { TemplateLineItem, TemplatePayment } from "@/lib/proposal-templates";
+import {
+  ensureProposalTemplatesSeeded,
+  type TemplateLineItem,
+  type TemplatePayment,
+} from "@/lib/proposal-templates";
 
 export function appBaseUrl() {
   return (
@@ -138,6 +142,7 @@ export async function finalizeDepositPaid(sessionId: string) {
  * Shared by the builder UI and the agent API.
  */
 export async function applyProposalTemplate(proposalId: string, templateKey: string) {
+  await ensureProposalTemplatesSeeded();
   const template = await prisma.proposalTemplate.findUnique({ where: { key: templateKey } });
   if (!template) return { ok: false as const, error: "Template not found" };
 
@@ -156,6 +161,8 @@ export async function applyProposalTemplate(proposalId: string, templateKey: str
         termsText: template.termsText,
         paymentScheduleType: template.paymentScheduleType,
         recurringInterval: template.recurringInterval,
+        // Auto-attach the matching sample deliverable for this service line.
+        ...(template.demoKey ? { demoKey: template.demoKey } : {}),
         ...(template.defaultDeliveryCost != null
           ? { estimatedDeliveryCost: template.defaultDeliveryCost }
           : {}),
@@ -199,6 +206,12 @@ export async function sendProposalCore(proposalId: string, actorUserId: string |
     return {
       ok: false as const,
       error: "Complete the scoping card (estimated hours) before sending.",
+    };
+  }
+  if (!proposal.demoKey) {
+    return {
+      ok: false as const,
+      error: "Attach a sample deliverable (demo) before sending.",
     };
   }
   if (proposal.lineItems.length === 0) {
@@ -250,6 +263,7 @@ export type ProposalFieldPatch = {
   estimatedDeliveryCost?: number;
   paymentScheduleType?: PaymentScheduleType;
   recurringInterval?: string;
+  demoKey?: string;
   lineItems?: TemplateLineItem[];
   payments?: TemplatePayment[];
 };
@@ -270,6 +284,7 @@ export async function applyProposalFields(proposalId: string, patch: ProposalFie
   if (patch.paymentScheduleType !== undefined)
     data.paymentScheduleType = patch.paymentScheduleType;
   if (patch.recurringInterval !== undefined) data.recurringInterval = patch.recurringInterval;
+  if (patch.demoKey !== undefined) data.demoKey = patch.demoKey || null;
   if (Object.keys(data).length) {
     await prisma.proposal.update({ where: { id: proposalId }, data });
   }
@@ -325,6 +340,7 @@ export async function getProposalSummary(id: string) {
     title: p.title,
     status: p.status,
     scoped: scope.computed.budgetCost > 0,
+    demoKey: p.demoKey,
     scoping: {
       markupEnabled: scope.markupEnabled,
       markupPct: scope.markupPct,

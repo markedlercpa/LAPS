@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { stripeConfigured } from "@/lib/stripe";
 import { ensureProposalTemplatesSeeded } from "@/lib/proposal-templates";
 import { getScopingView } from "@/lib/scoping";
+import { listDemos } from "@/lib/demos";
 import { Button } from "@/components/ui/button";
 import { ProposalStatusBadge } from "@/components/status-badge";
 import { ProposalEditor } from "@/components/proposals/proposal-editor";
@@ -55,6 +56,11 @@ export default async function ProposalDetailPage({
 
   const scoping = await getScopingView(proposal.id);
   const scoped = scoping.computed.budgetCost > 0;
+  const demoOptions = (await listDemos()).map((d) => ({
+    key: d.key,
+    name: d.name,
+    serviceLine: d.serviceLine,
+  }));
   const locked = proposal.status === "WON" || proposal.status === "LOST";
 
   return (
@@ -98,6 +104,8 @@ export default async function ProposalDetailPage({
         shareUrl={shareUrl}
         stripeEnabled={stripeConfigured()}
         scoped={scoped}
+        demoKey={proposal.demoKey}
+        demos={demoOptions}
         templates={templates}
         snippets={snippets}
         proposal={{
