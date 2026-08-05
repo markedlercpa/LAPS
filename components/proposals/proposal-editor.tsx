@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Send, Copy, Check } from "lucide-react";
 import type {
@@ -94,6 +94,19 @@ export function ProposalEditor({
   const [copied, setCopied] = useState(false);
   const [sendNote, setSendNote] = useState<string | null>(null);
 
+  // Re-sync the editable fields whenever the SERVER value changes (e.g. after
+  // applying a template or refreshing). Each effect keys on its own server prop,
+  // so it only fires when that value actually changed on the server — it never
+  // clobbers in-progress edits from an unrelated refresh.
+  useEffect(() => setCover(proposal.coverLetter ?? ""), [proposal.coverLetter]);
+  useEffect(() => setScope(proposal.scopeNarrative ?? ""), [proposal.scopeNarrative]);
+  useEffect(() => setTerms(proposal.termsText ?? ""), [proposal.termsText]);
+  useEffect(
+    () => setDeliveryCost(String(proposal.estimatedDeliveryCost)),
+    [proposal.estimatedDeliveryCost],
+  );
+  useEffect(() => setLink(shareUrl), [shareUrl]);
+
   const contractValue = proposal.lineItems.reduce((s, li) => s + li.quantity * li.unitPrice, 0);
   const deliveryNum = parseFloat(deliveryCost) || 0;
   const margin = contractValue - deliveryNum;
@@ -102,6 +115,16 @@ export function ProposalEditor({
   const depositAmount = proposal.payments[0]?.amount ?? 0;
   const collectsDeposit = stripeEnabled && depositAmount > 0;
   const locked = proposal.status === "WON" || proposal.status === "LOST";
+
+  // Mirror the server-side send guard so the button state matches reality.
+  const missingLineItems = proposal.lineItems.length === 0;
+  const missingDeliveryCost = deliveryNum <= 0;
+  const canSend = !missingLineItems && !missingDeliveryCost;
+  const sendBlockedReason = missingLineItems
+    ? "Add at least one line item to send."
+    : missingDeliveryCost
+      ? "Set the delivery cost (margin) to send."
+      : null;
 
   const saveDelivery = () =>
     startTransition(async () => {
@@ -490,11 +513,20 @@ export function ProposalEditor({
         <MicroLabel>Send &amp; sign</MicroLabel>
         {!locked ? (
           <>
-            <button className="btn btn-primary btn-block mt-3" onClick={send} disabled={pending}>
+            <button
+              className="btn btn-primary btn-block mt-3"
+              onClick={send}
+              disabled={pending || !canSend}
+            >
               <Send className="h-4 w-4" />
               {proposal.sentAt ? "Resend proposal" : "Send proposal"}
             </button>
-            {!proposal.leadHasEmail && (
+            {sendBlockedReason && (
+              <p className="mt-2 text-[12px] text-accent-700">
+                {sendBlockedReason} Tip: pick a template above to fill everything at once.
+              </p>
+            )}
+            {canSend && !proposal.leadHasEmail && (
               <p className="mt-2 text-[12px] text-muted">
                 This lead has no email — sending generates a link you can copy and share.
               </p>
