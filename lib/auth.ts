@@ -14,6 +14,14 @@ const providers: NextAuthConfig["providers"] = [];
 if (process.env.AUTH_MICROSOFT_ENTRA_ID_ID) {
   providers.push(
     MicrosoftEntraID({
+      // Pass these explicitly rather than relying on Auth.js env inference: the
+      // provider eagerly defaults `issuer` to the /common endpoint at construction,
+      // which env defaults won't override — so on a single-tenant app that yields
+      // AADSTS50194. Setting `issuer` here (to the tenant-specific URL) wins over
+      // the /common default and points the flow at the correct tenant endpoints.
+      clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID,
+      clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET,
+      issuer: process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER,
       authorization: { params: { scope: GRAPH_SCOPES } },
       // Single-tenant internal app: link a Microsoft login to an existing user
       // with the same (Microsoft-verified) email, so reps keep their records.
