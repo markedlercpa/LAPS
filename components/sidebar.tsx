@@ -10,6 +10,7 @@ import {
   FileText,
   Trophy,
   BarChart3,
+  Settings,
   LogOut,
 } from "lucide-react";
 import { cn, initials } from "@/lib/utils";
@@ -21,6 +22,7 @@ const NAV = [
   { href: "/proposals", index: "03", label: "Proposals", icon: FileText, letter: "P" },
   { href: "/sales", index: "04", label: "Sales Closed", icon: Trophy, letter: "S" },
   { href: "/reporting", index: "05", label: "Reporting", icon: BarChart3, letter: "" },
+  { href: "/settings", index: "06", label: "Settings", icon: Settings, letter: "" },
 ];
 
 export function Sidebar({

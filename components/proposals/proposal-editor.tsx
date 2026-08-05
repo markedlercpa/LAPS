@@ -40,6 +40,7 @@ export function ProposalEditor({
   proposal,
   shareUrl,
   stripeEnabled,
+  scoped,
   templates,
   snippets,
 }: {
@@ -65,6 +66,7 @@ export function ProposalEditor({
   };
   shareUrl: string | null;
   stripeEnabled: boolean;
+  scoped: boolean;
   templates: TemplateOption[];
   snippets: SnippetOption[];
 }) {
@@ -118,12 +120,11 @@ export function ProposalEditor({
 
   // Mirror the server-side send guard so the button state matches reality.
   const missingLineItems = proposal.lineItems.length === 0;
-  const missingDeliveryCost = deliveryNum <= 0;
-  const canSend = !missingLineItems && !missingDeliveryCost;
-  const sendBlockedReason = missingLineItems
-    ? "Add at least one line item to send."
-    : missingDeliveryCost
-      ? "Set the delivery cost (margin) to send."
+  const canSend = scoped && !missingLineItems;
+  const sendBlockedReason = !scoped
+    ? "Complete the scoping card (estimated hours) to send."
+    : missingLineItems
+      ? "Add at least one line item to send."
       : null;
 
   const saveDelivery = () =>
@@ -522,9 +523,7 @@ export function ProposalEditor({
               {proposal.sentAt ? "Resend proposal" : "Send proposal"}
             </button>
             {sendBlockedReason && (
-              <p className="mt-2 text-[12px] text-accent-700">
-                {sendBlockedReason} Tip: pick a template above to fill everything at once.
-              </p>
+              <p className="mt-2 text-[12px] text-accent-700">{sendBlockedReason}</p>
             )}
             {canSend && !proposal.leadHasEmail && (
               <p className="mt-2 text-[12px] text-muted">
@@ -577,20 +576,14 @@ export function ProposalEditor({
           )}
         </div>
 
-        {/* Internal margin */}
+        {/* Internal margin (delivery cost comes from the scoping engine) */}
         <MicroLabel className="mt-8 block">Internal margin</MicroLabel>
         <div className="field mt-3">
-          <label>Estimated delivery cost</label>
-          <input
-            className="input"
-            type="number"
-            value={deliveryCost}
-            onChange={(e) => setDeliveryCost(e.target.value)}
-            onBlur={saveDelivery}
-          />
+          <label>Delivery cost (budget, from scope)</label>
+          <input className="input" type="text" value={formatCurrency(deliveryNum)} readOnly />
         </div>
         <p className="mt-2 text-[12px] text-muted">
-          Internal only — never shown to the client. Required before sending.
+          Set by the scoping engine above (budget cost). Internal only — never shown to the client.
         </p>
 
         <div className="mt-4 grid grid-cols-2 border-y-2 border-divider">

@@ -12,6 +12,13 @@ export const paymentSchema = z.object({
   dueOn: z.string().optional(),
 });
 
+export const scopeLineSchema = z.object({
+  level: z.enum(["ASSOCIATE", "SENIOR", "MANAGER", "DIRECTOR", "PARTNER"]),
+  hours: z.number().min(0),
+  costRate: z.number().min(0).optional(),
+  billRate: z.number().min(0).optional(),
+});
+
 /** Fields an agent can set on a proposal (shared by create + patch). */
 export const proposalFieldsSchema = z.object({
   title: z.string().min(1).optional(),
@@ -25,6 +32,10 @@ export const proposalFieldsSchema = z.object({
   recurringInterval: z.string().optional(),
   lineItems: z.array(lineItemSchema).optional(),
   payments: z.array(paymentSchema).optional(),
+  // Scoping engine: hours per level (drives price + margin) + sales markup.
+  scoping: z.array(scopeLineSchema).optional(),
+  salesMarkupEnabled: z.boolean().optional(),
+  salesMarkupPct: z.number().min(0).optional(),
 });
 
 export const createProposalSchema = proposalFieldsSchema.extend({

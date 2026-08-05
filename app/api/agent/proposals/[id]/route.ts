@@ -6,6 +6,7 @@ import {
   applyProposalFields,
   getProposalSummary,
 } from "@/lib/proposals";
+import { saveScope } from "@/lib/scoping";
 import { patchProposalSchema } from "@/lib/agent-schemas";
 
 export const dynamic = "force-dynamic";
@@ -38,13 +39,22 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!parsed.success) {
     return json({ error: "Invalid input", issues: parsed.error.issues }, 400);
   }
-  const { templateKey, ...fields } = parsed.data;
+  const { templateKey, scoping, salesMarkupEnabled, salesMarkupPct, ...fields } = parsed.data;
 
   if (templateKey) {
     const r = await applyProposalTemplate(id, templateKey);
     if (!r.ok) return json({ error: r.error }, 400);
   }
   await applyProposalFields(id, fields);
+
+  if (scoping || salesMarkupEnabled !== undefined || salesMarkupPct !== undefined) {
+    if (scoping) await prisma.proposalLineItem.deleteMany({ where: { proposalId: id } });
+    await saveScope(id, {
+      lines: scoping ?? [],
+      markupEnabled: salesMarkupEnabled ?? false,
+      markupPct: salesMarkupPct ?? 0,
+    });
+  }
 
   revalidatePath(`/proposals/${id}`);
   revalidatePath("/proposals");

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { ONBOARDING_CHECKLIST_TEMPLATE } from "@/lib/constants";
 import { getStripe } from "@/lib/stripe";
 import { graphConfigured, sendMailAsUser } from "@/lib/graph";
+import { isScoped, getScopingView } from "@/lib/scoping";
 import type { TemplateLineItem, TemplatePayment } from "@/lib/proposal-templates";
 
 export function appBaseUrl() {
@@ -194,11 +195,14 @@ export async function sendProposalCore(proposalId: string, actorUserId: string |
     include: { lineItems: true, lead: true },
   });
   if (!proposal) return { ok: false as const, error: "Proposal not found" };
+  if (!(await isScoped(proposalId))) {
+    return {
+      ok: false as const,
+      error: "Complete the scoping card (estimated hours) before sending.",
+    };
+  }
   if (proposal.lineItems.length === 0) {
     return { ok: false as const, error: "Add at least one line item before sending." };
-  }
-  if (Number(proposal.estimatedDeliveryCost) <= 0) {
-    return { ok: false as const, error: "Enter the estimated delivery cost (margin) before sending." };
   }
 
   const token = proposal.publicToken ?? randomUUID();
@@ -315,10 +319,18 @@ export async function getProposalSummary(id: string) {
     (s, li) => s + Number(li.quantity) * Number(li.unitPrice),
     0,
   );
+  const scope = await getScopingView(p.id);
   return {
     id: p.id,
     title: p.title,
     status: p.status,
+    scoped: scope.computed.budgetCost > 0,
+    scoping: {
+      markupEnabled: scope.markupEnabled,
+      markupPct: scope.markupPct,
+      lines: scope.lines,
+      ...scope.computed,
+    },
     publicToken: p.publicToken,
     link: p.publicToken ? `${appBaseUrl()}/p/${p.publicToken}` : null,
     paymentStatus: p.paymentStatus,

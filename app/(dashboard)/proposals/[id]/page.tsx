@@ -4,9 +4,11 @@ import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { stripeConfigured } from "@/lib/stripe";
 import { ensureProposalTemplatesSeeded } from "@/lib/proposal-templates";
+import { getScopingView } from "@/lib/scoping";
 import { Button } from "@/components/ui/button";
 import { ProposalStatusBadge } from "@/components/status-badge";
 import { ProposalEditor } from "@/components/proposals/proposal-editor";
+import { ScopingCard } from "@/components/proposals/scoping-card";
 import { formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -51,6 +53,10 @@ export default async function ProposalDetailPage({
   ).replace(/\/$/, "");
   const shareUrl = proposal.publicToken ? `${base}/p/${proposal.publicToken}` : null;
 
+  const scoping = await getScopingView(proposal.id);
+  const scoped = scoping.computed.budgetCost > 0;
+  const locked = proposal.status === "WON" || proposal.status === "LOST";
+
   return (
     <div>
       <Link href="/proposals">
@@ -76,9 +82,22 @@ export default async function ProposalDetailPage({
         </div>
       </div>
 
+      <div className="mb-6">
+        <ScopingCard
+          proposalId={proposal.id}
+          locked={locked}
+          scoping={{
+            lines: scoping.lines,
+            markupEnabled: scoping.markupEnabled,
+            markupPct: scoping.markupPct,
+          }}
+        />
+      </div>
+
       <ProposalEditor
         shareUrl={shareUrl}
         stripeEnabled={stripeConfigured()}
+        scoped={scoped}
         templates={templates}
         snippets={snippets}
         proposal={{

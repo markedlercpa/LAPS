@@ -6,6 +6,7 @@ import {
   applyProposalFields,
   getProposalSummary,
 } from "@/lib/proposals";
+import { saveScope } from "@/lib/scoping";
 import { createProposalSchema } from "@/lib/agent-schemas";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +28,15 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return json({ error: "Invalid input", issues: parsed.error.issues }, 400);
   }
-  const { leadId, leadEmail, templateKey, ...fields } = parsed.data;
+  const {
+    leadId,
+    leadEmail,
+    templateKey,
+    scoping,
+    salesMarkupEnabled,
+    salesMarkupPct,
+    ...fields
+  } = parsed.data;
 
   const lead = leadId
     ? await prisma.lead.findUnique({ where: { id: leadId } })
@@ -51,6 +60,17 @@ export async function POST(req: Request) {
     if (!r.ok) return json({ error: r.error }, 400);
   }
   await applyProposalFields(proposal.id, fields);
+
+  // Scoping drives the price: clear any template line items and let the scope set
+  // the fee. Only when the agent supplies scoping hours or a markup.
+  if (scoping || salesMarkupEnabled !== undefined || salesMarkupPct !== undefined) {
+    if (scoping) await prisma.proposalLineItem.deleteMany({ where: { proposalId: proposal.id } });
+    await saveScope(proposal.id, {
+      lines: scoping ?? [],
+      markupEnabled: salesMarkupEnabled ?? false,
+      markupPct: salesMarkupPct ?? 0,
+    });
+  }
 
   // Advance the lead into the Proposal stage if it's earlier.
   await prisma.lead.updateMany({

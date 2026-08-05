@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { markProposalWon, applyProposalTemplate, sendProposalCore } from "@/lib/proposals";
+import { saveScope } from "@/lib/scoping";
 import type { ProposalStatus } from "@prisma/client";
 
 async function currentUserId() {
@@ -134,6 +135,31 @@ export async function deletePayment(id: string, proposalId: string) {
   await prisma.proposalPayment.delete({ where: { id } });
   revalidatePath(`/proposals/${proposalId}`);
   return { ok: true };
+}
+
+const scopeSchema = z.object({
+  markupEnabled: z.boolean(),
+  markupPct: z.coerce.number().min(0),
+  lines: z.array(
+    z.object({
+      level: z.enum(["ASSOCIATE", "SENIOR", "MANAGER", "DIRECTOR", "PARTNER"]),
+      hours: z.coerce.number().min(0),
+      costRate: z.coerce.number().min(0).optional(),
+      billRate: z.coerce.number().min(0).optional(),
+    }),
+  ),
+});
+
+/** Save the scoping card; sets delivery cost (= budget cost) and the quoted fee. */
+export async function updateScoping(proposalId: string, input: unknown) {
+  const parsed = scopeSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid scope" };
+  }
+  await saveScope(proposalId, parsed.data);
+  revalidatePath(`/proposals/${proposalId}`);
+  revalidatePath("/proposals");
+  return { ok: true as const };
 }
 
 /** Prefill this proposal from a full template (replaces sections + line items + schedule). */

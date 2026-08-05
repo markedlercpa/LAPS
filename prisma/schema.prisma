@@ -225,6 +225,23 @@ enum PaymentStatus {
   PAID
 }
 
+enum StaffLevel {
+  ASSOCIATE
+  SENIOR
+  MANAGER
+  DIRECTOR
+  PARTNER
+}
+
+// Firm-wide standard rate card (one row per level). Scoping cards default their
+// per-level cost/bill rates from here.
+model RateCardLevel {
+  level     StaffLevel @id
+  cost      Decimal    @db.Decimal(12, 2)
+  bill      Decimal    @db.Decimal(12, 2)
+  sortOrder Int        @default(0)
+}
+
 model Proposal {
   id                   String         @id @default(cuid())
   hubspotId            String?        @unique
@@ -264,14 +281,36 @@ model Proposal {
   stripeSessionId       String?       @unique
   stripePaymentIntentId String?
 
-  lead      Lead                @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  owner     User?               @relation("ProposalOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-  lineItems ProposalLineItem[]
-  payments  ProposalPayment[]
-  handoff   Handoff?
+  // Scoping engine: sales-value markup on top of standard budget revenue
+  salesMarkupEnabled Boolean @default(false)
+  salesMarkupPct     Decimal @default(0) @db.Decimal(6, 2)
+
+  lead         Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  owner        User?              @relation("ProposalOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  lineItems    ProposalLineItem[]
+  payments     ProposalPayment[]
+  scopingLines ScopingLine[]
+  handoff      Handoff?
 
   @@index([leadId])
   @@index([status])
+}
+
+// Per-proposal scoping: estimated hours per staff level with the cost/bill rates
+// (snapshot-defaulted from the firm rate card, overridable per deal).
+model ScopingLine {
+  id         String     @id @default(cuid())
+  proposalId String
+  level      StaffLevel
+  hours      Decimal    @default(0) @db.Decimal(10, 2)
+  costRate   Decimal    @default(0) @db.Decimal(12, 2)
+  billRate   Decimal    @default(0) @db.Decimal(12, 2)
+  sortOrder  Int        @default(0)
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@unique([proposalId, level])
+  @@index([proposalId])
 }
 
 model ProposalPayment {
