@@ -32,5 +32,13 @@ services:
         value: https://laps-wxm8.onrender.com
       - key: NEXTAUTH_URL
         value: https://laps-wxm8.onrender.com
+      # Microsoft 365 sign-in + Graph email/calendar. Set the values in the
+      # Render dashboard (Environment tab) — they are secrets, never committed.
+      - key: AUTH_MICROSOFT_ENTRA_ID_ID
+        sync: false
+      - key: AUTH_MICROSOFT_ENTRA_ID_SECRET
+        sync: false
+      - key: AUTH_MICROSOFT_ENTRA_ID_ISSUER
+        sync: false
       - key: NODE_VERSION
         value: "22"

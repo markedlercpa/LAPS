@@ -15,6 +15,9 @@ if (process.env.AUTH_MICROSOFT_ENTRA_ID_ID) {
   providers.push(
     MicrosoftEntraID({
       authorization: { params: { scope: GRAPH_SCOPES } },
+      // Single-tenant internal app: link a Microsoft login to an existing user
+      // with the same (Microsoft-verified) email, so reps keep their records.
+      allowDangerousEmailAccountLinking: true,
     }),
   );
 }
