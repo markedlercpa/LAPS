@@ -417,6 +417,54 @@ export async function sendConfirmationEmails(appointmentId: string): Promise<voi
   }
 }
 
+/**
+ * Send reminder emails for bookings starting within the next `withinHours` that
+ * haven't been reminded yet. Idempotent per booking (reminderSentAt guard).
+ * Returns how many reminders were sent. Best-effort per booking.
+ */
+export async function sendDueReminders(withinHours = 24): Promise<number> {
+  if (!graphConfigured()) return 0;
+  const now = new Date();
+  const until = new Date(now.getTime() + withinHours * 3600_000);
+  const due = await prisma.appointment.findMany({
+    where: {
+      status: "BOOKED",
+      bookedVia: "booking_page",
+      reminderSentAt: null,
+      inviteeEmail: { not: null },
+      scheduledAt: { gt: now, lte: until },
+    },
+    include: { eventType: { include: { host: true } } },
+  });
+
+  let sent = 0;
+  for (const appt of due) {
+    if (!appt.ownerId || !appt.inviteeEmail || !appt.eventType) continue;
+    const host = appt.eventType.host;
+    const tz = appt.timezone || host.timezone;
+    const whenLabel = `${formatDateInZone(appt.scheduledAt, tz)} · ${formatTimeInZone(appt.scheduledAt, tz)} (${tz})`;
+    const b = baseUrl();
+    const res = await sendMailAsUser({
+      userId: appt.ownerId,
+      to: appt.inviteeEmail,
+      subject: `Reminder: ${appt.eventType.name} · ${whenLabel}`,
+      html: `<div style="font-family:Arial,sans-serif;font-size:15px">
+        <p>Hi ${appt.inviteeName || "there"},</p>
+        <p>A reminder that your <strong>${appt.eventType.name}</strong> is coming up.</p>
+        <p><strong>When:</strong> ${whenLabel}</p>
+        ${appt.meetingUrl ? `<p><strong>Where:</strong> <a href="${appt.meetingUrl}">${appt.meetingUrl}</a></p>` : ""}
+        <p><a href="${b}/book/${host.slug}/${appt.eventType.slug}?reschedule=${appt.rescheduleToken}">Reschedule</a> ·
+        <a href="${b}/book/cancel/${appt.cancelToken}">Cancel</a></p>
+      </div>`,
+    });
+    if (res.ok) {
+      await prisma.appointment.update({ where: { id: appt.id }, data: { reminderSentAt: new Date() } });
+      sent++;
+    }
+  }
+  return sent;
+}
+
 /** Reschedule to a new slot via the reschedule token. */
 export async function rescheduleBooking(token: string, newStartISO: string) {
   const appt = await prisma.appointment.findUnique({

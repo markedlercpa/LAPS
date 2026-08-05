@@ -32,6 +32,9 @@ services:
         value: https://laps-wxm8.onrender.com
       - key: NEXTAUTH_URL
         value: https://laps-wxm8.onrender.com
+      # Public base URL used in booking confirmation/reminder links.
+      - key: NEXT_PUBLIC_APP_URL
+        value: https://laps-wxm8.onrender.com
       # Microsoft 365 sign-in + Graph email/calendar. Set the values in the
       # Render dashboard (Environment tab) — they are secrets, never committed.
       - key: AUTH_MICROSOFT_ENTRA_ID_ID
@@ -54,5 +57,25 @@ services:
       # ECHO's Fireflies import shows "not connected".
       - key: FIREFLIES_API_KEY
         sync: false
+      # Shared secret guarding the reminder cron endpoint. The cron job below
+      # sends it as a bearer token.
+      - key: CRON_SECRET
+        generateValue: true
       - key: NODE_VERSION
         value: "22"
+
+  # Hourly ping to send booking reminder emails for calls in the next 24h.
+  - type: cron
+    name: laps-booking-reminders
+    runtime: node
+    plan: free
+    branch: claude/laps-sales-cycle-saas-2twnnv
+    schedule: "0 * * * *"
+    buildCommand: "true"
+    startCommand: >
+      node -e "fetch(process.env.REMINDER_URL,{method:'POST',headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(r=>r.text()).then(t=>{console.log(t)}).catch(e=>{console.error(e);process.exit(1)})"
+    envVars:
+      - key: REMINDER_URL
+        value: https://laps-wxm8.onrender.com/api/cron/booking-reminders
+      - key: CRON_SECRET
+        sync: false
