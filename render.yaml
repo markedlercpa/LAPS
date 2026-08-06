@@ -58,6 +58,13 @@ services:
       # ECHO's Fireflies import shows "not connected".
       - key: FIREFLIES_API_KEY
         sync: false
+      # Embedded chat assistant (Anthropic). Set the key in the Render dashboard;
+      # when unset, the in-app assistant shows "not configured" (503).
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Optional model override for the assistant (defaults to claude-opus-5).
+      - key: ANTHROPIC_AGENT_MODEL
+        sync: false
       # Shared secret guarding the reminder cron endpoint. The cron job below
       # sends it as a bearer token.
       - key: CRON_SECRET

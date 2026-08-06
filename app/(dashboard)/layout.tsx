@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { SessionProvider } from "next-auth/react";
 import { auth } from "@/lib/auth";
 import { Sidebar } from "@/components/sidebar";
+import { ChatWidget } from "@/components/agent/chat-widget";
 
 export default async function DashboardLayout({
   children,
@@ -25,6 +26,7 @@ export default async function DashboardLayout({
           <div className="mx-auto max-w-frame px-12 pb-[72px] pt-8">{children}</div>
         </main>
       </div>
+      <ChatWidget />
     </SessionProvider>
   );
 }
