@@ -46,7 +46,7 @@ export async function getUserGraphToken(userId: string): Promise<string | null> 
     // Must mirror the delegated scopes in lib/auth.ts — Azure only grants the
     // scopes requested here on refresh, so a stale value silently downgrades
     // the token (e.g. dropping Calendars.ReadWrite → no calendar writes).
-    scope: "offline_access User.Read Mail.Send Mail.Read Calendars.ReadWrite",
+    scope: "offline_access User.Read Mail.Send Mail.ReadWrite Calendars.ReadWrite",
   });
 
   const res = await fetch(tokenUrl, {
@@ -252,5 +252,204 @@ export async function deleteCalendarEvent(userId: string, eventId: string): Prom
   } catch (e) {
     console.error("deleteCalendarEvent failed:", e instanceof Error ? e.message : e);
     return false;
+  }
+}
+
+// ── Mail triage (Karbon-style inbox) ──────────────────────────────────────
+
+export type MailAddress = { name?: string; address?: string };
+
+export type MailListItem = {
+  id: string;
+  conversationId?: string;
+  subject: string;
+  from: MailAddress | null;
+  toRecipients: MailAddress[];
+  receivedDateTime: string | null;
+  bodyPreview: string;
+  isRead: boolean;
+  hasAttachments: boolean;
+  categories: string[];
+};
+
+export type MailFull = MailListItem & {
+  ccRecipients: MailAddress[];
+  bodyHtml: string;
+  bodyContentType: string;
+  webLink?: string;
+};
+
+const MAIL_LIST_SELECT =
+  "id,conversationId,subject,from,toRecipients,receivedDateTime,bodyPreview,isRead,hasAttachments,categories";
+
+function addr(a?: { emailAddress?: { name?: string; address?: string } }): MailAddress | null {
+  if (!a?.emailAddress) return null;
+  return { name: a.emailAddress.name, address: a.emailAddress.address };
+}
+function addrs(list?: { emailAddress?: { name?: string; address?: string } }[]): MailAddress[] {
+  return (list ?? []).map((a) => addr(a)).filter((x): x is MailAddress => Boolean(x));
+}
+
+/** List messages from a well-known folder (default Inbox), newest first. */
+export async function listMailMessages(
+  userId: string,
+  opts: { folder?: string; top?: number; unreadOnly?: boolean; search?: string } = {},
+): Promise<MailListItem[]> {
+  const token = await getUserGraphToken(userId);
+  if (!token) return [];
+  const folder = opts.folder || "inbox";
+  const top = Math.min(Math.max(opts.top ?? 40, 1), 100);
+  const params = new URLSearchParams();
+  params.set("$top", String(top));
+  params.set("$select", MAIL_LIST_SELECT);
+
+  // $search can't be combined with $orderby/$filter; branch accordingly.
+  const headers: Record<string, string> = {};
+  if (opts.search) {
+    params.set("$search", `"${opts.search.replace(/"/g, '')}"`);
+  } else {
+    params.set("$orderby", "receivedDateTime desc");
+    if (opts.unreadOnly) params.set("$filter", "isRead eq false");
+  }
+
+  const res = await graphFetch(
+    token,
+    `/me/mailFolders/${folder}/messages?${params.toString()}`,
+    { headers },
+  );
+  const json = (await res.json()) as { value: RawMessage[] };
+  return (json.value ?? []).map(toListItem);
+}
+
+type RawMessage = {
+  id: string;
+  conversationId?: string;
+  subject?: string;
+  from?: { emailAddress?: { name?: string; address?: string } };
+  toRecipients?: { emailAddress?: { name?: string; address?: string } }[];
+  ccRecipients?: { emailAddress?: { name?: string; address?: string } }[];
+  receivedDateTime?: string;
+  bodyPreview?: string;
+  isRead?: boolean;
+  hasAttachments?: boolean;
+  categories?: string[];
+  body?: { contentType?: string; content?: string };
+  webLink?: string;
+};
+
+function toListItem(m: RawMessage): MailListItem {
+  return {
+    id: m.id,
+    conversationId: m.conversationId,
+    subject: m.subject || "(no subject)",
+    from: addr(m.from),
+    toRecipients: addrs(m.toRecipients),
+    receivedDateTime: m.receivedDateTime ?? null,
+    bodyPreview: m.bodyPreview ?? "",
+    isRead: Boolean(m.isRead),
+    hasAttachments: Boolean(m.hasAttachments),
+    categories: m.categories ?? [],
+  };
+}
+
+/** Fetch a single message with its full HTML body. */
+export async function getMailMessage(userId: string, id: string): Promise<MailFull | null> {
+  const token = await getUserGraphToken(userId);
+  if (!token) return null;
+  const res = await graphFetch(
+    token,
+    `/me/messages/${id}?$select=${MAIL_LIST_SELECT},ccRecipients,body,webLink`,
+  );
+  const m = (await res.json()) as RawMessage;
+  return {
+    ...toListItem(m),
+    ccRecipients: addrs(m.ccRecipients),
+    bodyHtml: m.body?.content ?? "",
+    bodyContentType: m.body?.contentType ?? "html",
+    webLink: m.webLink,
+  };
+}
+
+/** Reply to a message in-thread with an HTML body. Best-effort. */
+export async function replyToMail(
+  userId: string,
+  id: string,
+  html: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const token = await getUserGraphToken(userId);
+  if (!token) return { ok: false, error: "Microsoft 365 account not connected." };
+  try {
+    // Create a reply draft, set its HTML body, then send — preserves threading.
+    const draftRes = await graphFetch(token, `/me/messages/${id}/createReply`, { method: "POST" });
+    const draft = (await draftRes.json()) as { id: string };
+    await graphFetch(token, `/me/messages/${draft.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ body: { contentType: "HTML", content: html } }),
+    });
+    await graphFetch(token, `/me/messages/${draft.id}/send`, { method: "POST" });
+    return { ok: true };
+  } catch (e) {
+    console.error("replyToMail failed:", e instanceof Error ? e.message : e);
+    return { ok: false, error: e instanceof Error ? e.message : "Reply failed" };
+  }
+}
+
+/** Move a message to a well-known folder (default Archive). Best-effort. */
+export async function moveMail(
+  userId: string,
+  id: string,
+  destinationId = "archive",
+): Promise<{ ok: boolean; error?: string }> {
+  const token = await getUserGraphToken(userId);
+  if (!token) return { ok: false, error: "Not connected." };
+  try {
+    await graphFetch(token, `/me/messages/${id}/move`, {
+      method: "POST",
+      body: JSON.stringify({ destinationId }),
+    });
+    return { ok: true };
+  } catch (e) {
+    console.error("moveMail failed:", e instanceof Error ? e.message : e);
+    return { ok: false, error: e instanceof Error ? e.message : "Move failed" };
+  }
+}
+
+/** Set the categories (tags) on a message. Syncs to Outlook. Best-effort. */
+export async function setMailCategories(
+  userId: string,
+  id: string,
+  categories: string[],
+): Promise<{ ok: boolean; error?: string }> {
+  const token = await getUserGraphToken(userId);
+  if (!token) return { ok: false, error: "Not connected." };
+  try {
+    await graphFetch(token, `/me/messages/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ categories }),
+    });
+    return { ok: true };
+  } catch (e) {
+    console.error("setMailCategories failed:", e instanceof Error ? e.message : e);
+    return { ok: false, error: e instanceof Error ? e.message : "Tag failed" };
+  }
+}
+
+/** Mark a message read/unread. Best-effort. */
+export async function setMailRead(
+  userId: string,
+  id: string,
+  isRead: boolean,
+): Promise<{ ok: boolean }> {
+  const token = await getUserGraphToken(userId);
+  if (!token) return { ok: false };
+  try {
+    await graphFetch(token, `/me/messages/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ isRead }),
+    });
+    return { ok: true };
+  } catch (e) {
+    console.error("setMailRead failed:", e instanceof Error ? e.message : e);
+    return { ok: false };
   }
 }

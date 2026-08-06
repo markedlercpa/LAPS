@@ -17,6 +17,7 @@ import {
   Radio,
   PenLine,
   LineChart,
+  Inbox,
   LogOut,
 } from "lucide-react";
 import { cn, initials } from "@/lib/utils";
@@ -28,6 +29,7 @@ const MODULES = [
     caption: "Sales cycle",
     items: [
       { href: "/pipeline", label: "Pipeline", icon: Activity },
+      { href: "/inbox", label: "Email Triage", icon: Inbox },
       { href: "/leads", label: "Lead Generation", icon: Users },
       { href: "/appointments", label: "Appointments", icon: Calendar },
       { href: "/scheduling", label: "Scheduling", icon: CalendarClock },
