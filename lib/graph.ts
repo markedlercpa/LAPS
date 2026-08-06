@@ -43,7 +43,10 @@ export async function getUserGraphToken(userId: string): Promise<string | null> 
     client_secret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET ?? "",
     grant_type: "refresh_token",
     refresh_token: account.refresh_token,
-    scope: "offline_access User.Read Mail.Send Mail.Read Calendars.Read",
+    // Must mirror the delegated scopes in lib/auth.ts — Azure only grants the
+    // scopes requested here on refresh, so a stale value silently downgrades
+    // the token (e.g. dropping Calendars.ReadWrite → no calendar writes).
+    scope: "offline_access User.Read Mail.Send Mail.Read Calendars.ReadWrite",
   });
 
   const res = await fetch(tokenUrl, {

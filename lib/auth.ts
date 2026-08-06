@@ -67,11 +67,31 @@ export const authConfig: NextAuthConfig = {
   debug: process.env.AUTH_DEBUG === "true",
   providers,
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, account }) {
       if (user) {
         token.uid = user.id;
         // role is present on the credentials user; look it up for OAuth users
         token.role = (user as { role?: string }).role;
+      }
+      // Auth.js does not refresh a linked account's stored tokens on later
+      // logins, so a re-consent (e.g. after widening scopes) would be lost.
+      // Persist the fresh Microsoft tokens on every sign-in so Graph reads the
+      // latest, correctly-scoped refresh_token. Guarded to the M365 provider.
+      if (account?.provider === "microsoft-entra-id" && account.access_token) {
+        await prisma.account.updateMany({
+          where: {
+            provider: account.provider,
+            providerAccountId: account.providerAccountId,
+          },
+          data: {
+            access_token: account.access_token,
+            refresh_token: account.refresh_token ?? undefined,
+            expires_at: typeof account.expires_at === "number" ? account.expires_at : undefined,
+            scope: account.scope ?? undefined,
+            id_token: account.id_token ?? undefined,
+            token_type: account.token_type ?? undefined,
+          },
+        });
       }
       if (token.uid && !token.role) {
         const db = await prisma.user.findUnique({
