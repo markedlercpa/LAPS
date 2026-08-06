@@ -72,6 +72,22 @@ export async function getUserGraphToken(userId: string): Promise<string | null> 
   return json.access_token;
 }
 
+/**
+ * Decode the `scp` (delegated scopes) claim from a Graph access token (a JWT)
+ * for diagnostics. Never throws; returns "unknown" if it can't be read. Does
+ * not log the token itself.
+ */
+function tokenScopes(token: string): string {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return "unknown";
+    const json = JSON.parse(Buffer.from(payload, "base64").toString("utf8")) as { scp?: string };
+    return json.scp ?? "(no scp claim)";
+  } catch {
+    return "unknown";
+  }
+}
+
 async function graphFetch(token: string, path: string, init?: RequestInit) {
   const res = await fetch(`${GRAPH_BASE}${path}`, {
     ...init,
@@ -237,7 +253,12 @@ export async function createCalendarEvent(
   } catch (e) {
     // Best-effort: never break the booking, but surface why in the logs
     // (e.g. a missing Calendars.ReadWrite scope shows up as Graph 403 here).
-    console.error("createCalendarEvent failed:", e instanceof Error ? e.message : e);
+    console.error(
+      "createCalendarEvent failed:",
+      e instanceof Error ? e.message : e,
+      "| token scopes:",
+      tokenScopes(token),
+    );
     return null;
   }
 }
