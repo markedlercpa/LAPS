@@ -50,7 +50,7 @@ export async function updateHost(input: unknown) {
       active: parsed.data.active ?? host.active,
     },
   });
-  revalidatePath("/scheduling");
+  revalidatePath("/appointments");
   return { ok: true as const, slug };
 }
 
@@ -70,7 +70,7 @@ export async function saveAvailability(rules: unknown) {
       data: valid.map((r) => ({ hostId: host.id, weekday: r.weekday, startMin: r.startMin, endMin: r.endMin })),
     }),
   ]);
-  revalidatePath("/scheduling");
+  revalidatePath("/appointments");
   return { ok: true as const };
 }
 
@@ -135,7 +135,7 @@ export async function saveEventType(input: unknown) {
   } else {
     await prisma.bookingEventType.create({ data: { ...data, hostId: host.id } });
   }
-  revalidatePath("/scheduling");
+  revalidatePath("/appointments");
   return { ok: true as const };
 }
 
@@ -143,7 +143,7 @@ export async function toggleEventActive(id: string, active: boolean) {
   const host = await myHost();
   if (!host) return { ok: false as const, error: "Not signed in" };
   await prisma.bookingEventType.updateMany({ where: { id, hostId: host.id }, data: { active } });
-  revalidatePath("/scheduling");
+  revalidatePath("/appointments");
   return { ok: true as const };
 }
 
@@ -151,6 +151,6 @@ export async function deleteEventType(id: string) {
   const host = await myHost();
   if (!host) return { ok: false as const, error: "Not signed in" };
   await prisma.bookingEventType.deleteMany({ where: { id, hostId: host.id } });
-  revalidatePath("/scheduling");
+  revalidatePath("/appointments");
   return { ok: true as const };
 }

@@ -4,10 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import {
+  Home,
   Activity,
   Users,
   Calendar,
-  CalendarClock,
   FileText,
   Trophy,
   BarChart3,
@@ -19,42 +19,69 @@ import {
   LineChart,
   Inbox,
   LogOut,
+  type LucideIcon,
 } from "lucide-react";
 import { cn, initials } from "@/lib/utils";
 
-// Multi-module ERP: each module groups its own subsections.
-const MODULES = [
+type NavItem = { href: string; label: string; icon: LucideIcon };
+type Module = {
+  key: string;
+  name: string;
+  caption: string;
+  href: string;
+  icon: LucideIcon;
+  items: NavItem[];
+};
+
+// Top-level modules, in display order: Triage, then ECHO, then LAPS.
+const MODULES: Module[] = [
   {
-    name: "LAPS",
-    caption: "Sales cycle",
-    items: [
-      { href: "/pipeline", label: "Pipeline", icon: Activity },
-      { href: "/inbox", label: "Email Triage", icon: Inbox },
-      { href: "/leads", label: "Lead Generation", icon: Users },
-      { href: "/appointments", label: "Appointments", icon: Calendar },
-      { href: "/scheduling", label: "Scheduling", icon: CalendarClock },
-      { href: "/proposals", label: "Proposals", icon: FileText },
-      { href: "/sales", label: "Sales Closed", icon: Trophy },
-      { href: "/reporting", label: "Reporting", icon: BarChart3 },
-      { href: "/settings", label: "Settings", icon: Settings },
-    ],
+    key: "triage",
+    name: "Triage",
+    caption: "Email",
+    href: "/inbox",
+    icon: Inbox,
+    items: [], // single-page module
   },
   {
+    key: "echo",
     name: "ECHO",
     caption: "Content engine",
+    href: "/echo/evidence",
+    icon: Radio,
     items: [
-      { href: "/echo", label: "Overview", icon: Radio },
       { href: "/echo/evidence", label: "Evidence", icon: Vault },
       { href: "/echo/calling-cards", label: "Calling Cards", icon: Megaphone },
       { href: "/echo/content", label: "Housed Content", icon: PenLine },
       { href: "/echo/optics", label: "Optics", icon: LineChart },
     ],
   },
+  {
+    key: "laps",
+    name: "LAPS",
+    caption: "Sales cycle",
+    href: "/pipeline",
+    icon: Activity,
+    items: [
+      { href: "/pipeline", label: "Pipeline", icon: Activity },
+      { href: "/leads", label: "Lead Generation", icon: Users },
+      { href: "/appointments", label: "Appointments", icon: Calendar },
+      { href: "/proposals", label: "Proposals", icon: FileText },
+      { href: "/sales", label: "Sales Closed", icon: Trophy },
+      { href: "/reporting", label: "Reporting", icon: BarChart3 },
+      { href: "/settings", label: "Settings", icon: Settings },
+    ],
+  },
 ];
 
-function isActive(pathname: string, href: string) {
-  // Exact for module roots like /echo; prefix for the rest.
-  if (href === "/echo") return pathname === "/echo";
+function activeModuleKey(pathname: string): string | null {
+  if (pathname.startsWith("/inbox")) return "triage";
+  if (pathname.startsWith("/echo")) return "echo";
+  if (pathname.startsWith("/home")) return null;
+  return "laps"; // pipeline/leads/appointments/proposals/sales/reporting/settings
+}
+
+function itemActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
@@ -64,31 +91,44 @@ export function Sidebar({
   user: { name?: string | null; email?: string | null; role?: string };
 }) {
   const pathname = usePathname();
+  const activeKey = activeModuleKey(pathname);
+  const activeModule = MODULES.find((m) => m.key === activeKey) ?? null;
 
   return (
-    <aside className="flex h-screen w-[252px] shrink-0 flex-col border-r-2 border-divider bg-bg">
-      {/* Brand */}
-      <div className="border-b-2 border-divider px-4 py-6">
-        <div className="font-heading text-[22px] font-extrabold tracking-[-0.03em] leading-none">
+    <aside className="flex h-screen w-[248px] shrink-0 flex-col border-r-2 border-divider bg-bg">
+      {/* Brand → Home */}
+      <Link href="/home" className="block border-b-2 border-divider px-4 py-6 no-underline">
+        <div className="font-heading text-[22px] font-extrabold leading-none tracking-[-0.03em] text-ink">
           Edler Zain
         </div>
         <div className="micro-label mt-2">Operating System</div>
-      </div>
+      </Link>
 
-      {/* Modules */}
       <nav className="flex-1 overflow-y-auto p-2">
-        {MODULES.map((mod) => (
-          <div key={mod.name} className="mb-4">
-            <div className="flex items-baseline gap-2 px-3 pb-1 pt-2">
-              <span className="font-heading text-[15px] font-extrabold tracking-[-0.02em]">
-                {mod.name}
-              </span>
-              <span className="micro-label text-neutral-500">{mod.caption}</span>
+        {/* Module switcher */}
+        <div className="space-y-0.5">
+          <SwitcherLink href="/home" label="Home" icon={Home} active={activeKey === null} />
+          {MODULES.map((m) => (
+            <SwitcherLink
+              key={m.key}
+              href={m.href}
+              label={m.name}
+              icon={m.icon}
+              active={activeKey === m.key}
+            />
+          ))}
+        </div>
+
+        {/* Current module's pages */}
+        {activeModule && activeModule.items.length > 0 && (
+          <div className="mt-5">
+            <div className="flex items-baseline gap-2 px-3 pb-1">
+              <span className="micro-label text-neutral-500">{activeModule.name}</span>
             </div>
             <div className="space-y-0.5">
-              {mod.items.map((item) => {
-                const active = isActive(pathname, item.href);
+              {activeModule.items.map((item) => {
                 const Icon = item.icon;
+                const active = itemActive(pathname, item.href);
                 return (
                   <Link
                     key={item.href}
@@ -107,7 +147,7 @@ export function Sidebar({
               })}
             </div>
           </div>
-        ))}
+        )}
       </nav>
 
       {/* Footer / user */}
@@ -117,9 +157,7 @@ export function Sidebar({
             {initials(user.name ?? user.email)}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="truncate font-heading text-[13px] font-extrabold">
-              {user.name ?? "User"}
-            </div>
+            <div className="truncate font-heading text-[13px] font-extrabold">{user.name ?? "User"}</div>
             <div className="truncate text-[11px] text-muted">{user.email}</div>
           </div>
           <button
@@ -133,5 +171,32 @@ export function Sidebar({
         </div>
       </div>
     </aside>
+  );
+}
+
+function SwitcherLink({
+  href,
+  label,
+  icon: Icon,
+  active,
+}: {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  active: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "grid grid-cols-[18px_1fr] items-center gap-3 border-2 px-3 py-2 font-heading text-[14px] font-extrabold no-underline",
+        active
+          ? "border-ink bg-ink text-bg"
+          : "border-transparent text-ink hover:border-divider hover:bg-surface",
+      )}
+    >
+      <Icon className="h-[18px] w-[18px]" />
+      <span>{label}</span>
+    </Link>
   );
 }
