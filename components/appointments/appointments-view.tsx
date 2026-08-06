@@ -65,7 +65,7 @@ export function AppointmentsView({ rows }: { rows: ApptRow[] }) {
           columns={columns}
           data={rows}
           searchKeys={["title", "leadName"]}
-          rowHref={(r) => `/leads/${r.leadId}`}
+          rowHref={(r) => `/appointments/${r.id}`}
           emptyMessage="No appointments yet."
           searchPlaceholder="Search appointments"
         />
