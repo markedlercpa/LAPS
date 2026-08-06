@@ -24,8 +24,9 @@ services:
           property: connectionString
       - key: AUTH_SECRET
         generateValue: true
+      # Dev login disabled in production — Microsoft 365 is the only way in.
       - key: ALLOW_DEV_LOGIN
-        value: "true"
+        value: "false"
       # Public URL so Auth.js redirects to the deployed host (not localhost).
       # Update this if the service URL changes.
       - key: AUTH_URL

@@ -1,9 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import { signIn } from "next-auth/react";
 
-const DEV_USERS = ["mark@edlerzain.com", "jordan@edlerzain.com", "sam@edlerzain.com"];
 const LAPS_ROWS = [
   { letter: "L", label: "Lead Generation" },
   { letter: "A", label: "Appointments" },
@@ -12,23 +10,11 @@ const LAPS_ROWS = [
 ];
 
 export default function SignInPage() {
-  const [email, setEmail] = useState("mark@edlerzain.com");
-  const [loading, setLoading] = useState(false);
-  const devEnabled = process.env.NEXT_PUBLIC_ALLOW_DEV_LOGIN !== "false";
-
-  const doDevLogin = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    setLoading(true);
-    await signIn("dev-login", { email, callbackUrl: "/pipeline" });
-  };
-
   return (
     <div className="grid min-h-screen grid-cols-1 md:grid-cols-2">
       {/* Poster */}
       <div className="hidden flex-col justify-between bg-accent p-8 text-bg md:flex">
-        <div className="font-heading text-[34px] font-extrabold tracking-[-0.03em]">
-          LAPS
-        </div>
+        <div className="font-heading text-[34px] font-extrabold tracking-[-0.03em]">LAPS</div>
         <div>
           <div className="micro-label text-bg/80">Sales Cycle</div>
           <div className="mt-4">
@@ -56,48 +42,10 @@ export default function SignInPage() {
           <button
             className="btn btn-primary btn-block"
             style={{ minHeight: 44 }}
-            onClick={() => signIn("microsoft-entra-id", { callbackUrl: "/pipeline" })}
+            onClick={() => signIn("microsoft-entra-id", { callbackUrl: "/home" })}
           >
             Sign in with Microsoft 365
           </button>
-
-          {devEnabled && (
-            <>
-              <div className="my-6 flex items-center gap-3">
-                <span className="h-0.5 flex-1 bg-divider" />
-                <span className="micro-label">Dev login</span>
-                <span className="h-0.5 flex-1 bg-divider" />
-              </div>
-
-              <form onSubmit={doDevLogin} className="field space-y-3">
-                <div>
-                  <label htmlFor="email">Email (seeded user)</label>
-                  <input
-                    id="email"
-                    type="email"
-                    className="input"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {DEV_USERS.map((u) => (
-                    <button
-                      key={u}
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => setEmail(u)}
-                    >
-                      {u.split("@")[0]}
-                    </button>
-                  ))}
-                </div>
-                <button type="submit" className="btn btn-secondary btn-block" disabled={loading}>
-                  {loading ? "Signing in…" : "Continue"}
-                </button>
-              </form>
-            </>
-          )}
         </div>
       </div>
     </div>
