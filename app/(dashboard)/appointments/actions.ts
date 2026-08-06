@@ -51,6 +51,26 @@ export async function updateAppointmentStatus(id: string, status: AppointmentSta
   return { ok: true };
 }
 
+/**
+ * Permanently delete an appointment (and its action items via cascade). Best-
+ * effort removes the linked Outlook calendar event first so the host's calendar
+ * stays clean. Use for test/junk bookings.
+ */
+export async function deleteAppointment(id: string) {
+  const appt = await prisma.appointment.findUnique({
+    where: { id },
+    select: { ownerId: true, graphEventId: true },
+  });
+  if (!appt) return { ok: false as const, error: "Not found" };
+  if (appt.graphEventId && appt.ownerId) {
+    const { deleteCalendarEvent } = await import("@/lib/graph");
+    await deleteCalendarEvent(appt.ownerId, appt.graphEventId);
+  }
+  await prisma.appointment.delete({ where: { id } });
+  revalidatePath("/appointments");
+  return { ok: true as const };
+}
+
 const actionItemSchema = z.object({
   appointmentId: z.string(),
   leadId: z.string().optional(),

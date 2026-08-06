@@ -5,6 +5,7 @@ import type { AppointmentStatus } from "@prisma/client";
 import { DataTable, type Column } from "@/components/data-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AppointmentStatusSelect } from "@/components/appointments/appointment-status-select";
+import { DeleteAppointmentButton } from "@/components/appointments/delete-appointment-button";
 import { formatDateTime } from "@/lib/utils";
 
 const AppointmentCalendar = dynamic(
@@ -45,8 +46,9 @@ export function AppointmentsView({ rows }: { rows: ApptRow[] }) {
       header: "Status",
       numeric: true,
       render: (r) => (
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-1">
           <AppointmentStatusSelect id={r.id} status={r.status} />
+          <DeleteAppointmentButton id={r.id} />
         </div>
       ),
     },
