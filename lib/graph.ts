@@ -231,7 +231,10 @@ export async function createCalendarEvent(
     });
     const json = (await res.json()) as { id?: string };
     return json.id ?? null;
-  } catch {
+  } catch (e) {
+    // Best-effort: never break the booking, but surface why in the logs
+    // (e.g. a missing Calendars.ReadWrite scope shows up as Graph 403 here).
+    console.error("createCalendarEvent failed:", e instanceof Error ? e.message : e);
     return null;
   }
 }
@@ -243,7 +246,8 @@ export async function deleteCalendarEvent(userId: string, eventId: string): Prom
   try {
     await graphFetch(token, `/me/events/${eventId}`, { method: "DELETE" });
     return true;
-  } catch {
+  } catch (e) {
+    console.error("deleteCalendarEvent failed:", e instanceof Error ? e.message : e);
     return false;
   }
 }

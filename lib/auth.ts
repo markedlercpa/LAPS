@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 // Delegated Graph scopes needed to send mail, read replies, and read calendars
 // as the signed-in rep.
 const GRAPH_SCOPES =
-  "openid profile email offline_access User.Read Mail.Send Mail.Read Calendars.Read";
+  "openid profile email offline_access User.Read Mail.Send Mail.Read Calendars.ReadWrite";
 
 const providers: NextAuthConfig["providers"] = [];
 
