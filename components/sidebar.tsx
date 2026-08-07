@@ -85,7 +85,13 @@ const MODULES: Module[] = [
     caption: "Delivery",
     href: "/work/engagements",
     icon: Boxes,
-    items: [{ href: "/work/engagements", label: "Engagements", icon: ClipboardList }],
+    items: [
+      { href: "/work/engagements", label: "Delivery", icon: ClipboardList },
+      { href: "/work/capacity/engagements", label: "Engagements", icon: Table2 },
+      { href: "/work/capacity/portfolios", label: "Portfolios", icon: Landmark },
+      { href: "/work/capacity/resources", label: "Resources", icon: Users },
+      { href: "/work/capacity/admin", label: "Capacity admin", icon: Settings },
+    ],
   },
   {
     key: "finance",

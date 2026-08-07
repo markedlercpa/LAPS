@@ -1274,3 +1274,170 @@ model VarianceNote {
   @@unique([entityId, reportingAccountId, periodMonth])
   @@index([entityId, periodMonth])
 }
+
+// ===========================================================================
+// WORK — Capacity & Portfolio Economics ("Capacity" module, HOTEL spec)
+// Phase 1: the ledger — role bands (effective-dated rates), pool resources,
+// portfolios, portfolio engagements + per-band hour budgets, and Karbon
+// actuals synced into consumed-only booking rows. Booking lifecycle,
+// week-close, and P&L settlement are Phases 2-3.
+// ===========================================================================
+
+enum CapacityBookingStatus {
+  REQUESTED
+  CONFIRMED
+  RELEASED
+  CONSUMED_CLOSED
+  DECLINED
+}
+
+/// A pricing tier (Associate / Senior Associate / Manager / Tax Review).
+/// Bookings charge at the band rate, not per-person, to prevent arbitrage.
+/// Rates are effective-dated in RoleBandRate (never mutate history).
+model RoleBand {
+  id                 String   @id @default(cuid())
+  name               String   @unique
+  targetUtilization  Decimal  @default(0.80) @db.Decimal(4, 3) // for loaded-rate derivation
+  sortOrder          Int      @default(0)
+  active             Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  rates       RoleBandRate[]
+  resources   PoolResource[]
+  budgets     EngagementRoleBudget[]
+  bookings    CapacityBooking[]
+}
+
+/// Effective-dated loaded/bill rates for a role band. P&L math always uses the
+/// row whose effectiveFrom is the latest on or before the booking's week start.
+model RoleBandRate {
+  id             String   @id @default(cuid())
+  roleBandId     String
+  loadedRateCents Int
+  billRateCents  Int? // optional standard billing rate for realized-rate analysis
+  effectiveFrom  DateTime @db.Date
+  note           String?  @db.Text // derivation inputs, for auditability
+  createdAt      DateTime @default(now())
+
+  roleBand RoleBand @relation(fields: [roleBandId], references: [id], onDelete: Cascade)
+
+  @@unique([roleBandId, effectiveFrom])
+  @@index([roleBandId])
+}
+
+/// A pool member (delivery staff below director level).
+model PoolResource {
+  id                  String   @id @default(cuid())
+  personName          String
+  email               String   @unique // match key for Karbon time-entry sync
+  karbonUserId        String? // nullable until mapped
+  roleBandId          String
+  weeklyCapacityHours Decimal  @default(40) @db.Decimal(5, 2)
+  skillTags           String[]
+  location            String?
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  createdBy           String?
+
+  roleBand RoleBand          @relation(fields: [roleBandId], references: [id])
+  bookings CapacityBooking[]
+
+  @@index([roleBandId])
+}
+
+/// A Portfolio Director's book of clients/engagements — the P&L unit.
+model Portfolio {
+  id                          String   @id @default(cuid())
+  name                        String
+  directorName                String
+  directorEmail               String
+  directorCostCentsAnnual     Int      @default(0)
+  declaredPortfolioRevenueCents Int    @default(0)
+  gpTargetPct                 Decimal  @default(0.50) @db.Decimal(5, 4)
+  bonusCliffBandPct           Decimal  @default(0.20) @db.Decimal(5, 4)
+  directorBillableFloorPct    Decimal  @default(0.45) @db.Decimal(5, 4)
+  active                      Boolean  @default(true)
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+  createdBy                   String?
+
+  engagements PortfolioEngagement[]
+  bookings    CapacityBooking[]
+
+  @@index([active])
+}
+
+/// A client work item (mirrors a Karbon work item). Belongs to one Portfolio,
+/// carries an hours budget by role band.
+model PortfolioEngagement {
+  id                  String   @id @default(cuid())
+  portfolioId         String
+  clientName          String
+  karbonWorkItemKey   String? // Karbon sync key
+  engagementType      String   @default("other") // qoe | cas_monthly | tax | advisory | other
+  revenueCents        Int      @default(0)
+  revenueRecognition  String   @default("fixed_on_completion") // fixed_on_completion | monthly | pct_hours
+  startWeek           String? // ISO week e.g. 2026-W33
+  endWeek             String?
+  status              String   @default("planned") // planned | active | on_hold | complete
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  createdBy           String?
+
+  portfolio Portfolio              @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  budgets   EngagementRoleBudget[]
+  bookings  CapacityBooking[]
+
+  @@index([portfolioId])
+  @@index([karbonWorkItemKey])
+}
+
+/// Budgeted hours for one engagement × role band.
+model EngagementRoleBudget {
+  id            String  @id @default(cuid())
+  engagementId  String
+  roleBandId    String
+  budgetedHours Decimal @default(0) @db.Decimal(7, 2)
+
+  engagement PortfolioEngagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  roleBand   RoleBand            @relation(fields: [roleBandId], references: [id])
+
+  @@unique([engagementId, roleBandId])
+  @@index([engagementId])
+}
+
+/// A reservation of N hours of a resource in an ISO week against an engagement —
+/// the atomic unit of the hoteling system. In Phase 1, Karbon writes
+/// consumed-only rows (hoursBooked = 0, unbookedConsumption = true).
+model CapacityBooking {
+  id                String                @id @default(cuid())
+  engagementId      String
+  portfolioId       String // denormalized from engagement for fast P&L queries
+  resourceId        String
+  roleBandId        String // snapshotted at confirm time
+  isoWeek           String // e.g. 2026-W33
+  hoursBooked       Decimal               @default(0) @db.Decimal(6, 2)
+  hoursConsumed     Decimal               @default(0) @db.Decimal(6, 2) // written by Karbon sync
+  status            CapacityBookingStatus @default(REQUESTED)
+  rateCentsSnapshot Int? // loaded rate locked at confirmation
+  requestedBy       String?
+  confirmedBy       String?
+  releasedAt        DateTime?
+  chargeFlag        Boolean               @default(false) // computed at week close
+  unbookedConsumption Boolean             @default(false) // consumed with no prior booking
+  overBudgetAck     Boolean               @default(false)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  engagement PortfolioEngagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  portfolio  Portfolio           @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  resource   PoolResource        @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  roleBand   RoleBand            @relation(fields: [roleBandId], references: [id])
+
+  @@unique([engagementId, resourceId, isoWeek])
+  @@index([portfolioId, isoWeek])
+  @@index([resourceId, isoWeek])
+  @@index([engagementId])
+}

@@ -89,6 +89,11 @@ services:
         sync: false
       - key: QBO_REDIRECT_URI
         sync: false
+      # Karbon (Work → Capacity actuals sync). Leave unset to disable.
+      - key: KARBON_BEARER_TOKEN
+        sync: false
+      - key: KARBON_ACCESS_KEY
+        sync: false
       # Shared secret guarding the reminder cron endpoint. The cron job below
       # sends it as a bearer token.
       - key: CRON_SECRET
@@ -126,5 +131,22 @@ services:
     envVars:
       - key: PACE_SYNC_URL
         value: https://laps-wxm8.onrender.com/api/cron/pace-sync
+      - key: CRON_SECRET
+        sync: false
+
+  # Nightly Karbon actuals sync — pulls trailing-8-week time entries into the
+  # Capacity module. No-op until KARBON_BEARER_TOKEN / KARBON_ACCESS_KEY are set.
+  - type: cron
+    name: laps-karbon-sync
+    runtime: node
+    plan: free
+    branch: claude/laps-sales-cycle-saas-2twnnv
+    schedule: "30 5 * * *"
+    buildCommand: "true"
+    startCommand: >
+      node -e "fetch(process.env.KARBON_SYNC_URL,{method:'POST',headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(r=>r.text()).then(t=>{console.log(t)}).catch(e=>{console.error(e);process.exit(1)})"
+    envVars:
+      - key: KARBON_SYNC_URL
+        value: https://laps-wxm8.onrender.com/api/cron/karbon-sync
       - key: CRON_SECRET
         sync: false
