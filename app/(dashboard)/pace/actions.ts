@@ -104,7 +104,7 @@ export async function mapAccountAction(ledgerAccountId: string, reportingAccount
 export async function startQboConnect(entityId: string) {
   if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
   if (!qboConfigured()) return { ok: false as const, error: "QuickBooks is not configured (set QBO_CLIENT_ID/SECRET)." };
-  const url = authorizeUrl(entityId);
+  const url = await authorizeUrl(entityId);
   if (!url) return { ok: false as const, error: "Could not build the authorize URL." };
   return { ok: true as const, url };
 }

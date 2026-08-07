@@ -22,7 +22,7 @@ export async function GET(req: Request) {
   const entityId = new URL(req.url).searchParams.get("entity");
   if (entityId) {
     const entity = await prisma.entity.findUnique({ where: { id: entityId }, select: { id: true } });
-    const url = entity ? authorizeUrl(entity.id) : null;
+    const url = entity ? await authorizeUrl(entity.id) : null;
     if (url) redirect(url);
   }
   redirect("/pace/entities?qbo=connect");

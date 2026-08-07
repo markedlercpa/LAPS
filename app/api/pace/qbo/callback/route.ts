@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { exchangeCode, qboConfigured } from "@/lib/pace/qbo";
+import { exchangeCode, qboConfigured, verifyState } from "@/lib/pace/qbo";
 
 /**
  * Intuit OAuth redirect target. Intuit sends `code`, `state` (our entityId), and
@@ -17,8 +17,9 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
-  const entityId = url.searchParams.get("state");
   const realmId = url.searchParams.get("realmId");
+  // Verify the signed, time-boxed state (CSRF protection) → entityId.
+  const entityId = verifyState(url.searchParams.get("state"));
 
   if (!code || !entityId || !realmId) redirect("/pace/entities?qbo=error");
 
