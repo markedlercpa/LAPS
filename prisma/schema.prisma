@@ -1330,8 +1330,7 @@ model RoleBandRate {
 model PoolResource {
   id                  String   @id @default(cuid())
   personName          String
-  email               String   @unique // match key for Karbon time-entry sync
-  karbonUserId        String? // nullable until mapped
+  email               String   @unique
   roleBandId          String
   weeklyCapacityHours Decimal  @default(40) @db.Decimal(5, 2)
   skillTags           String[]
@@ -1341,8 +1340,9 @@ model PoolResource {
   updatedAt           DateTime @updatedAt
   createdBy           String?
 
-  roleBand RoleBand          @relation(fields: [roleBandId], references: [id])
-  bookings CapacityBooking[]
+  roleBand    RoleBand          @relation(fields: [roleBandId], references: [id])
+  bookings    CapacityBooking[]
+  timeEntries TimeEntry[]
 
   @@index([roleBandId])
 }
@@ -1375,7 +1375,6 @@ model PortfolioEngagement {
   id                  String   @id @default(cuid())
   portfolioId         String
   clientName          String
-  karbonWorkItemKey   String? // Karbon sync key
   engagementType      String   @default("other") // qoe | cas_monthly | tax | advisory | other
   revenueCents        Int      @default(0)
   revenueRecognition  String   @default("fixed_on_completion") // fixed_on_completion | monthly | pct_hours
@@ -1386,12 +1385,12 @@ model PortfolioEngagement {
   updatedAt           DateTime @updatedAt
   createdBy           String?
 
-  portfolio Portfolio              @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
-  budgets   EngagementRoleBudget[]
-  bookings  CapacityBooking[]
+  portfolio   Portfolio              @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  budgets     EngagementRoleBudget[]
+  bookings    CapacityBooking[]
+  timeEntries TimeEntry[]
 
   @@index([portfolioId])
-  @@index([karbonWorkItemKey])
 }
 
 /// Budgeted hours for one engagement × role band.
@@ -1439,5 +1438,32 @@ model CapacityBooking {
   @@unique([engagementId, resourceId, isoWeek])
   @@index([portfolioId, isoWeek])
   @@index([resourceId, isoWeek])
+  @@index([engagementId])
+}
+
+/// Native time tracking — Pulse's own timesheet, the actuals source for the
+/// Capacity module (replaces any external ledger). One row per person × client
+/// work × day. Entries roll up (by engagement × resource × ISO week) into the
+/// matching CapacityBooking's hoursConsumed, which the economics read.
+model TimeEntry {
+  id           String   @id @default(cuid())
+  resourceId   String
+  engagementId String
+  portfolioId  String // denormalized from engagement
+  roleBandId   String // denormalized from the resource at entry time
+  workDate     DateTime @db.Date
+  isoWeek      String // computed on write, for fast rollup (e.g. 2026-W33)
+  hours        Decimal  @db.Decimal(5, 2)
+  notes        String?  @db.Text
+  billable     Boolean  @default(true)
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  resource   PoolResource        @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  engagement PortfolioEngagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  @@index([engagementId, resourceId, isoWeek])
+  @@index([resourceId, workDate])
   @@index([engagementId])
 }

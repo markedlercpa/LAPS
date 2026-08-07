@@ -17,7 +17,7 @@ export default async function ResourcesPage() {
       <PageHeader
         eyebrow="Work — Capacity"
         title="Pool resources"
-        description="Delivery staff in the shared pool. Email is the match key for Karbon time-entry sync; the role band sets the charge rate."
+        description="Delivery staff in the shared pool. The role band sets the charge rate; log their hours under Time."
       >
         <NewResourceButton bands={bandOptions} />
       </PageHeader>
@@ -33,7 +33,6 @@ export default async function ResourcesPage() {
               <th>Role band</th>
               <th className="num">Capacity</th>
               <th>Skills</th>
-              <th>Karbon</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -45,7 +44,6 @@ export default async function ResourcesPage() {
                 <td>{r.roleBand.name}</td>
                 <td className="num">{Number(r.weeklyCapacityHours)}h</td>
                 <td className="text-muted">{r.skillTags.join(", ") || "—"}</td>
-                <td className="text-muted">{r.karbonUserId ? "mapped" : <span className="text-accent-700">unmapped</span>}</td>
                 <td>
                   <span className={`tag ${r.active ? "tag-neutral" : "tag-outline"}`}>{r.active ? "Active" : "Inactive"}</span>
                 </td>

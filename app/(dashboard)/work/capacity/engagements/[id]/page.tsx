@@ -29,10 +29,9 @@ export default async function EngagementDetailPage({ params }: { params: Promise
       <PageHeader
         eyebrow={`Work — Capacity · ${eng.portfolio.name}`}
         title={eng.clientName}
-        description={`${labelFor(ENGAGEMENT_TYPE_LABELS as Record<string, string>, eng.engagementType)}${
-          eng.karbonWorkItemKey ? ` · Karbon: ${eng.karbonWorkItemKey}` : " · no Karbon key yet"
-        }`}
+        description={labelFor(ENGAGEMENT_TYPE_LABELS as Record<string, string>, eng.engagementType)}
       >
+        <Link href={`/work/capacity/time?engagement=${eng.id}`} className="btn btn-secondary">Log time</Link>
         <Link href="/work/capacity/engagements" className="btn btn-secondary">All engagements</Link>
       </PageHeader>
 
@@ -106,7 +105,7 @@ export default async function EngagementDetailPage({ params }: { params: Promise
             )}
           </table>
           <p className="mt-2 text-[12px] text-muted">
-            Booked hours populate once the hoteling board ships (Phase 2). Today, consumed hours come from the Karbon sync.
+            Booked hours populate once the hoteling board ships (Phase 2). Consumed hours come from logged time (Work → Time).
           </p>
         </div>
 

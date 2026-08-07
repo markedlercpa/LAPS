@@ -22,6 +22,7 @@ import {
   ClipboardList,
   Gauge,
   Landmark,
+  Clock,
   Table2,
   Scale,
   FileBarChart,
@@ -88,6 +89,7 @@ const MODULES: Module[] = [
     items: [
       { href: "/work/engagements", label: "Delivery", icon: ClipboardList },
       { href: "/work/capacity/engagements", label: "Engagements", icon: Table2 },
+      { href: "/work/capacity/time", label: "Time", icon: Clock },
       { href: "/work/capacity/portfolios", label: "Portfolios", icon: Landmark },
       { href: "/work/capacity/resources", label: "Resources", icon: Users },
       { href: "/work/capacity/admin", label: "Capacity admin", icon: Settings },

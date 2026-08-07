@@ -1,22 +1,19 @@
 import { PageHeader } from "@/components/page-header";
 import { AddRateButton } from "@/components/work/add-rate";
-import { KarbonSyncButton } from "@/components/work/karbon-sync";
 import { listRoleBands } from "@/lib/work/capacity";
-import { karbonConfigured } from "@/lib/work/karbon";
 import { centsToUsd } from "@/lib/work-taxonomy";
 
 export const dynamic = "force-dynamic";
 
 export default async function CapacityAdminPage() {
   const bands = await listRoleBands();
-  const configured = karbonConfigured();
 
   return (
     <div>
       <PageHeader
         eyebrow="Work — Capacity"
         title="Admin"
-        description="Role-band rates (effective-dated — charging uses the rate in effect on each booking's week) and the Karbon actuals sync."
+        description="Role-band rates — effective-dated, so charging uses the rate in effect on each booking's week. Add a new row to change a rate; history is never overwritten."
       />
 
       <div className="micro-label mb-2">Role bands & loaded rates</div>
@@ -52,16 +49,6 @@ export default async function CapacityAdminPage() {
           })}
         </tbody>
       </table>
-
-      <div className="mt-8 micro-label mb-2">Karbon actuals sync</div>
-      <div className="card p-4">
-        <p className="mb-3 text-[13px] text-muted">
-          One-directional (Karbon → Pulse). Pulls the trailing 8 weeks of time entries, matches them by resource email
-          and work-item key, and lands consumed hours on each engagement. Runs nightly; use “Sync now” to pull on demand.
-          Unmatched people/work items are reported below so you can fix the email or Karbon key.
-        </p>
-        <KarbonSyncButton configured={configured} />
-      </div>
     </div>
   );
 }

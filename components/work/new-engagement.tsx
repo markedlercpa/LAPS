@@ -27,7 +27,6 @@ export function NewEngagementButton({ portfolios }: { portfolios: { id: string; 
         engagementType: fd.get("engagementType"),
         revenue: fd.get("revenue"),
         revenueRecognition: fd.get("revenueRecognition"),
-        karbonWorkItemKey: fd.get("karbonWorkItemKey") || undefined,
       });
       if (res.ok) {
         setOpen(false);
@@ -70,10 +69,6 @@ export function NewEngagementButton({ portfolios }: { portfolios: { id: string; 
             <select name="revenueRecognition" className="input" defaultValue="fixed_on_completion">
               {REVENUE_RECOGNITION.map((r) => <option key={r} value={r}>{REVENUE_RECOGNITION_LABELS[r]}</option>)}
             </select>
-          </label>
-          <label className="field">
-            <span className="micro-label">Karbon work-item key (optional)</span>
-            <input name="karbonWorkItemKey" className="input" placeholder="for actuals sync" />
           </label>
           {error && <p className="text-[13px] text-accent-700">{error}</p>}
           <div className="flex justify-end gap-2">

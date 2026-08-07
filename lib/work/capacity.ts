@@ -88,7 +88,6 @@ export async function createResource(input: {
   weeklyCapacityHours?: number;
   skillTags?: string[];
   location?: string | null;
-  karbonUserId?: string | null;
   createdBy?: string | null;
 }) {
   return prisma.poolResource.create({
@@ -99,7 +98,6 @@ export async function createResource(input: {
       weeklyCapacityHours: input.weeklyCapacityHours ?? 40,
       skillTags: input.skillTags ?? [],
       location: input.location ?? null,
-      karbonUserId: input.karbonUserId ?? null,
       createdBy: input.createdBy ?? null,
     },
   });
@@ -133,7 +131,6 @@ export async function createEngagement(input: {
   engagementType?: string;
   revenueCents?: number;
   revenueRecognition?: string;
-  karbonWorkItemKey?: string | null;
   startWeek?: string | null;
   endWeek?: string | null;
   createdBy?: string | null;
@@ -145,7 +142,6 @@ export async function createEngagement(input: {
       engagementType: input.engagementType ?? "other",
       revenueCents: input.revenueCents ?? 0,
       revenueRecognition: input.revenueRecognition ?? "fixed_on_completion",
-      karbonWorkItemKey: input.karbonWorkItemKey ?? null,
       startWeek: input.startWeek ?? null,
       endWeek: input.endWeek ?? null,
       createdBy: input.createdBy ?? null,

@@ -11,7 +11,7 @@ import {
   addRoleBandRate,
   ensureRoleBandsSeeded,
 } from "@/lib/work/capacity";
-import { karbonConfigured, syncKarbonActuals } from "@/lib/work/karbon";
+import { logTime, deleteTimeEntry } from "@/lib/work/time";
 import { ENGAGEMENT_TYPES, REVENUE_RECOGNITION } from "@/lib/work-taxonomy";
 
 async function requireUser() {
@@ -28,7 +28,6 @@ const resourceSchema = z.object({
   weeklyCapacityHours: z.coerce.number().min(0).max(80).default(40),
   skillTags: z.array(z.string()).default([]),
   location: z.string().optional(),
-  karbonUserId: z.string().optional(),
 });
 
 export async function createResourceAction(input: unknown) {
@@ -79,7 +78,6 @@ const engagementSchema = z.object({
   engagementType: z.enum(ENGAGEMENT_TYPES).default("other"),
   revenue: z.coerce.number().min(0).default(0),
   revenueRecognition: z.enum(REVENUE_RECOGNITION).default("fixed_on_completion"),
-  karbonWorkItemKey: z.string().optional(),
   startWeek: z.string().optional(),
   endWeek: z.string().optional(),
 });
@@ -95,7 +93,6 @@ export async function createEngagementAction(input: unknown) {
     engagementType: parsed.data.engagementType,
     revenueCents: dollarsToCents(parsed.data.revenue),
     revenueRecognition: parsed.data.revenueRecognition,
-    karbonWorkItemKey: parsed.data.karbonWorkItemKey || null,
     startWeek: parsed.data.startWeek || null,
     endWeek: parsed.data.endWeek || null,
     createdBy: userId,
@@ -141,11 +138,33 @@ export async function addRoleBandRateAction(input: unknown) {
   return { ok: true as const };
 }
 
-export async function triggerKarbonSyncAction() {
+// ── Time tracking (native actuals) ──────────────────────────────────────────
+
+const timeSchema = z.object({
+  resourceId: z.string().min(1, "Pick a resource"),
+  engagementId: z.string().min(1, "Pick an engagement"),
+  workDate: z.string().min(1, "Pick a date"),
+  hours: z.coerce.number().gt(0, "Hours must be greater than zero").max(24, "That's more than a day"),
+  notes: z.string().optional(),
+  billable: z.coerce.boolean().default(true),
+});
+
+export async function logTimeAction(input: unknown) {
+  const userId = await requireUser();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+  const parsed = timeSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  const res = await logTime({ ...parsed.data, notes: parsed.data.notes || null, createdBy: userId });
+  if (res.ok) {
+    revalidatePath("/work/capacity/time");
+    revalidatePath(`/work/capacity/engagements/${parsed.data.engagementId}`);
+  }
+  return res;
+}
+
+export async function deleteTimeEntryAction(id: string) {
   if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
-  if (!karbonConfigured()) return { ok: false as const, error: "Karbon is not configured." };
-  const res = await syncKarbonActuals();
-  revalidatePath("/work/capacity/admin");
-  revalidatePath("/work/capacity/engagements");
+  const res = await deleteTimeEntry(id);
+  revalidatePath("/work/capacity/time");
   return res;
 }

@@ -28,7 +28,6 @@ export function NewResourceButton({ bands }: { bands: { id: string; name: string
         weeklyCapacityHours: fd.get("weeklyCapacityHours"),
         skillTags: tags,
         location: fd.get("location") || undefined,
-        karbonUserId: fd.get("karbonUserId") || undefined,
       });
       if (res.ok) {
         setOpen(false);
@@ -67,16 +66,10 @@ export function NewResourceButton({ bands }: { bands: { id: string; name: string
               <input name="weeklyCapacityHours" type="number" min="0" max="80" step="1" className="input" defaultValue={40} />
             </label>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <label className="field">
-              <span className="micro-label">Location (optional)</span>
-              <input name="location" className="input" placeholder="LatAm / US" />
-            </label>
-            <label className="field">
-              <span className="micro-label">Karbon user id (optional)</span>
-              <input name="karbonUserId" className="input" />
-            </label>
-          </div>
+          <label className="field">
+            <span className="micro-label">Location (optional)</span>
+            <input name="location" className="input" placeholder="LatAm / US" />
+          </label>
           <div className="field">
             <span className="micro-label">Skill tags</span>
             <div className="flex flex-wrap gap-1.5">

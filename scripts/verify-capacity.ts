@@ -15,7 +15,7 @@ import {
   deriveLoadedRateCents,
 } from "@/lib/work/capacity";
 import { isoWeekOf, isoWeekStart } from "@/lib/work-taxonomy";
-import { matchTimeEntries, type MatchMaps } from "@/lib/work/karbon";
+import { logTime, deleteTimeEntry } from "@/lib/work/time";
 
 async function main() {
   // ISO week helpers (pure).
@@ -45,47 +45,35 @@ async function main() {
 
   // Portfolio + engagement + budget.
   const pf = await createPortfolio({ name: "ZZZ Cap Test", directorName: "Dir", directorEmail: "dir@example.com", declaredPortfolioRevenueCents: 50_000_00, gpTargetPct: 0.5 });
-  const eng = await createEngagement({ portfolioId: pf.id, clientName: "ZZZ Client", engagementType: "qoe", revenueCents: 40_000_00, karbonWorkItemKey: "WK-1" });
+  const eng = await createEngagement({ portfolioId: pf.id, clientName: "ZZZ Client", engagementType: "qoe", revenueCents: 40_000_00 });
   await replaceEngagementBudget(eng.id, [
     { roleBandId: assoc.id, budgetedHours: 100 },
     { roleBandId: mgr.id, budgetedHours: 20 },
   ]);
 
-  // Karbon matcher (pure): two associates entries same week + one manager, plus an unmatched person/work item.
+  // Native time tracking: two entries in the same ISO week roll up to one
+  // consumed-only booking of 10h. A third entry in a different week is separate.
   const res = await prisma.poolResource.create({ data: { personName: "Ana", email: "ana@example.com", roleBandId: assoc.id } });
-  const maps: MatchMaps = {
-    resourcesByEmail: new Map([["ana@example.com", { id: res.id, roleBandId: assoc.id }]]),
-    resourcesByKarbonId: new Map(),
-    engagementsByWorkItem: new Map([["WK-1", { id: eng.id, portfolioId: pf.id }]]),
-  };
-  const match = matchTimeEntries(
-    [
-      { userEmail: "ana@example.com", workItemKey: "WK-1", hours: 6, date: "2026-08-10" },
-      { userEmail: "ana@example.com", workItemKey: "WK-1", hours: 4, date: "2026-08-12" }, // same ISO week → sums to 10
-      { userEmail: "ghost@example.com", workItemKey: "WK-1", hours: 3, date: "2026-08-12" }, // unmatched person
-      { userEmail: "ana@example.com", workItemKey: "WK-UNKNOWN", hours: 2, date: "2026-08-12" }, // unmatched work item
-    ],
-    maps,
-  );
-  console.log(`matcher: ${match.upserts.length} upsert(s), first hours=${match.upserts[0]?.hoursConsumed} (10), unmatchedPeople=${match.unmatchedResources.length}, unmatchedWork=${match.unmatchedWorkItems.length}`);
-  if (match.upserts.length !== 1 || match.upserts[0].hoursConsumed !== 10) throw new Error("matcher bucketing wrong");
-  if (match.unmatchedResources.length !== 1 || match.unmatchedWorkItems.length !== 1) throw new Error("matcher unmatched reporting wrong");
-  if (match.upserts[0].isoWeek !== "2026-W33") throw new Error("matcher week wrong");
-
-  // Land the consumed hours and check economics: 10h Associate @ $90 = $900 consumed cost.
-  await prisma.capacityBooking.create({
-    data: {
-      engagementId: eng.id,
-      portfolioId: pf.id,
-      resourceId: res.id,
-      roleBandId: assoc.id,
-      isoWeek: "2026-W33",
-      hoursBooked: 0,
-      hoursConsumed: 10,
-      status: "CONSUMED_CLOSED",
-      unbookedConsumption: true,
-    },
+  const e1 = await logTime({ resourceId: res.id, engagementId: eng.id, workDate: "2026-08-10", hours: 6 });
+  await logTime({ resourceId: res.id, engagementId: eng.id, workDate: "2026-08-12", hours: 4 }); // same week → 10
+  if (!e1.ok) throw new Error("logTime failed");
+  const booking = await prisma.capacityBooking.findUnique({
+    where: { engagementId_resourceId_isoWeek: { engagementId: eng.id, resourceId: res.id, isoWeek: "2026-W33" } },
   });
+  console.log(`time rollup: booking consumed=${Number(booking?.hoursConsumed)} (10), unbooked=${booking?.unbookedConsumption}`);
+  if (!booking || Number(booking.hoursConsumed) !== 10 || !booking.unbookedConsumption) throw new Error("time rollup wrong");
+
+  // Deleting one entry re-rolls to 6; the booking stays.
+  await deleteTimeEntry(e1.id);
+  const afterDel = await prisma.capacityBooking.findUnique({
+    where: { engagementId_resourceId_isoWeek: { engagementId: eng.id, resourceId: res.id, isoWeek: "2026-W33" } },
+  });
+  console.log(`after delete: consumed=${Number(afterDel?.hoursConsumed)} (4)`);
+  if (Number(afterDel?.hoursConsumed) !== 4) throw new Error("re-rollup after delete wrong");
+  // Re-log so economics below see 10h.
+  await logTime({ resourceId: res.id, engagementId: eng.id, workDate: "2026-08-10", hours: 6 });
+
+  // Economics: 10h Associate @ $90 = $900 consumed cost.
   const econ = (await engagementEconomics(eng.id))!;
   console.log(`economics: consumed=${econ.totals.consumed}h cost=${(econ.totals.consumedCostCents / 100).toFixed(2)} GP=${(econ.grossProfitCents / 100).toFixed(2)} realized=${econ.realizedRateCents}`);
   if (econ.totals.consumedCostCents !== 90000) throw new Error(`consumed cost should be $900, got ${econ.totals.consumedCostCents}`);
