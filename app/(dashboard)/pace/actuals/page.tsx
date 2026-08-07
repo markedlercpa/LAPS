@@ -52,8 +52,8 @@ export default async function ActualsPage({
       >
         {entitySel && entitySel !== "all" && (
           <>
+            {qboConfigured() && <QboSyncButton entityId={entitySel} />}
             <ImportTbButton entityId={entitySel} />
-            {qboConfigured() && <QboSyncButton entityId={entitySel} month={monthSel} />}
           </>
         )}
       </PageHeader>
@@ -95,7 +95,9 @@ export default async function ActualsPage({
 
           {!statement || statement.lines.length === 0 ? (
             <p className="text-[14px] text-muted">
-              No trial balance loaded for this selection. Use “Import trial balance” to add one.
+              {qboConfigured() && entitySel !== "all"
+                ? "No trial balances loaded yet. Click “Sync from QBO” to pull the last two years of actuals from QuickBooks — that also fills the month picker. Or use “Import trial balance” to paste one manually."
+                : "No trial balance loaded for this selection. Use “Import trial balance” to add one."}
             </p>
           ) : (
             <StatementBlock statement={statement} period={period} consolidated={consolidated} />

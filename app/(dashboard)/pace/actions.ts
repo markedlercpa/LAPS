@@ -154,3 +154,64 @@ export async function triggerQboSync(entityId: string, periodMonth: string) {
   revalidatePath("/pace/actuals");
   return res;
 }
+
+/** First-of-month ISO strings for the trailing `count` months, oldest → newest. */
+function trailingMonths(count: number): string[] {
+  const now = new Date();
+  const out: string[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+/**
+ * One-click "bring in all data": pull the trailing N months of trial balances
+ * from QBO for an entity (default 24), importing each month that has data. Also
+ * syncs the chart of accounts first (numbers + mapping queue). No month needs to
+ * be picked — this is what populates the month dropdown in the first place.
+ */
+export async function syncQboActualsAction(entityId: string, monthsBack = 24) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  if (!qboConfigured()) return { ok: false as const, error: "QuickBooks is not configured." };
+
+  await syncLedgerAccounts(entityId).catch(() => null);
+
+  const months = trailingMonths(monthsBack);
+  let imported = 0;
+  let empty = 0;
+  let failed = 0;
+  const importedMonths: string[] = [];
+  for (const month of months) {
+    const rows = await pullTrialBalance(entityId, month);
+    if (rows === null) {
+      // null = not connected / pull failed. Bail early on the first month only;
+      // otherwise treat as a transient miss and keep going.
+      if (imported === 0 && empty === 0) {
+        return { ok: false as const, error: "QBO not connected for this entity, or the pull failed." };
+      }
+      failed += 1;
+      continue;
+    }
+    if (rows.length === 0) {
+      empty += 1;
+      continue;
+    }
+    await importTrialBalance({ entityId, periodMonth: month, rows, source: "qbo" });
+    imported += 1;
+    importedMonths.push(month.slice(0, 7));
+  }
+
+  revalidatePath("/pace/actuals");
+  revalidatePath("/pace/mapping");
+  revalidatePath("/pace/review");
+  return {
+    ok: true as const,
+    imported,
+    empty,
+    failed,
+    firstMonth: importedMonths[0] ?? null,
+    lastMonth: importedMonths[importedMonths.length - 1] ?? null,
+  };
+}
