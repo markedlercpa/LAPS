@@ -37,14 +37,18 @@ export default async function EngagementDetailPage({ params }: { params: Promise
 
       <MetricRow
         metrics={[
-          { label: "Revenue", value: centsToUsd(econ.revenueCents) },
+          {
+            label: "Contract",
+            value: centsToUsd(econ.revenueCents),
+            note: econ.realizedRateCents != null ? `realized ${centsToUsd(econ.realizedRateCents)}/h` : undefined,
+          },
+          {
+            label: "Recognized (% complete)",
+            value: centsToUsd(econ.recognizedRevenueCents),
+            note: econ.pctComplete != null ? `${Math.round(econ.pctComplete * 100)}% complete` : "set a budget to recognize",
+          },
           { label: "Consumed labor", value: centsToUsd(econ.totals.consumedCostCents) },
           { label: "Engagement GP", value: centsToUsd(econ.grossProfitCents), accent: econ.grossProfitCents < 0 },
-          {
-            label: "Realized rate",
-            value: econ.realizedRateCents != null ? `${centsToUsd(econ.realizedRateCents)}/h` : "—",
-            note: econ.burnPct != null ? `${Math.round(econ.burnPct * 100)}% of budget consumed` : undefined,
-          },
         ]}
       />
 

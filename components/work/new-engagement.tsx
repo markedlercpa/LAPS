@@ -5,12 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { createEngagementAction } from "@/app/(dashboard)/work/capacity/actions";
-import {
-  ENGAGEMENT_TYPES,
-  ENGAGEMENT_TYPE_LABELS,
-  REVENUE_RECOGNITION,
-  REVENUE_RECOGNITION_LABELS,
-} from "@/lib/work-taxonomy";
+import { ENGAGEMENT_TYPES, ENGAGEMENT_TYPE_LABELS } from "@/lib/work-taxonomy";
 
 export function NewEngagementButton({ portfolios }: { portfolios: { id: string; name: string }[] }) {
   const router = useRouter();
@@ -26,7 +21,6 @@ export function NewEngagementButton({ portfolios }: { portfolios: { id: string; 
         clientName: fd.get("clientName"),
         engagementType: fd.get("engagementType"),
         revenue: fd.get("revenue"),
-        revenueRecognition: fd.get("revenueRecognition"),
       });
       if (res.ok) {
         setOpen(false);
@@ -64,12 +58,7 @@ export function NewEngagementButton({ portfolios }: { portfolios: { id: string; 
               <input name="revenue" type="number" min="0" step="500" className="input" defaultValue={0} />
             </label>
           </div>
-          <label className="field">
-            <span className="micro-label">Revenue recognition</span>
-            <select name="revenueRecognition" className="input" defaultValue="fixed_on_completion">
-              {REVENUE_RECOGNITION.map((r) => <option key={r} value={r}>{REVENUE_RECOGNITION_LABELS[r]}</option>)}
-            </select>
-          </label>
+          <p className="text-[12px] text-muted">Revenue recognizes on % of completion (firm policy).</p>
           {error && <p className="text-[13px] text-accent-700">{error}</p>}
           <div className="flex justify-end gap-2">
             <button type="button" className="btn btn-secondary" onClick={() => setOpen(false)} disabled={pending}>Cancel</button>

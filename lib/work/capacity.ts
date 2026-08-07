@@ -88,6 +88,7 @@ export async function createResource(input: {
   weeklyCapacityHours?: number;
   skillTags?: string[];
   location?: string | null;
+  costExempt?: boolean;
   createdBy?: string | null;
 }) {
   return prisma.poolResource.create({
@@ -98,6 +99,7 @@ export async function createResource(input: {
       weeklyCapacityHours: input.weeklyCapacityHours ?? 40,
       skillTags: input.skillTags ?? [],
       location: input.location ?? null,
+      costExempt: input.costExempt ?? false,
       createdBy: input.createdBy ?? null,
     },
   });
@@ -141,7 +143,7 @@ export async function createEngagement(input: {
       clientName: input.clientName,
       engagementType: input.engagementType ?? "other",
       revenueCents: input.revenueCents ?? 0,
-      revenueRecognition: input.revenueRecognition ?? "fixed_on_completion",
+      revenueRecognition: input.revenueRecognition ?? "pct_hours",
       startWeek: input.startWeek ?? null,
       endWeek: input.endWeek ?? null,
       createdBy: input.createdBy ?? null,
@@ -183,11 +185,14 @@ export type BandLine = {
 export type EngagementEconomics = {
   engagementId: string;
   clientName: string;
-  revenueCents: number;
+  revenueCents: number; // contract value
+  revenueRecognition: string;
+  pctComplete: number | null; // consumed ÷ budgeted, capped at 1
+  recognizedRevenueCents: number; // contract × pctComplete (% completion)
   lines: BandLine[];
   totals: { budgeted: number; booked: number; consumed: number; consumedCostCents: number };
-  grossProfitCents: number; // revenue − consumed cost
-  realizedRateCents: number | null; // revenue ÷ consumed hours (per hour)
+  grossProfitCents: number; // recognized revenue − consumed cost
+  realizedRateCents: number | null; // contract ÷ consumed hours (per hour)
   burnPct: number | null; // consumed ÷ budgeted
   overBudget: boolean;
 };
@@ -202,7 +207,7 @@ export async function engagementEconomics(engagementId: string): Promise<Engagem
     where: { id: engagementId },
     include: {
       budgets: { include: { roleBand: true } },
-      bookings: { include: { roleBand: true } },
+      bookings: { include: { roleBand: true, resource: { select: { costExempt: true } } } },
     },
   });
   if (!eng) return null;
@@ -228,14 +233,19 @@ export async function engagementEconomics(engagementId: string): Promise<Engagem
     line.bookedHours += booked;
     line.consumedHours += consumed;
 
-    let rate = bk.rateCentsSnapshot ?? undefined;
-    if (rate === undefined) {
-      const key = `${bk.roleBandId}|${bk.isoWeek}`;
-      if (rateCache.has(key)) rate = rateCache.get(key)!;
-      else {
-        const r = await rateForBandWeek(bk.roleBandId, bk.isoWeek);
-        rate = r?.loadedRateCents ?? 0;
-        rateCache.set(key, rate);
+    // Cost-exempt resources (directors) count hours but cost $0 — their comp is
+    // carried as the portfolio's director-cost line, not per-hour labor.
+    let rate = 0;
+    if (!bk.resource.costExempt) {
+      rate = bk.rateCentsSnapshot ?? -1;
+      if (rate < 0) {
+        const key = `${bk.roleBandId}|${bk.isoWeek}`;
+        if (rateCache.has(key)) rate = rateCache.get(key)!;
+        else {
+          const r = await rateForBandWeek(bk.roleBandId, bk.isoWeek);
+          rate = r?.loadedRateCents ?? 0;
+          rateCache.set(key, rate);
+        }
       }
     }
     line.consumedCostCents += Math.round(consumed * rate);
@@ -253,19 +263,59 @@ export async function engagementEconomics(engagementId: string): Promise<Engagem
     { budgeted: 0, booked: 0, consumed: 0, consumedCostCents: 0 },
   );
 
-  const grossProfitCents = eng.revenueCents - totals.consumedCostCents;
-  const realizedRateCents = totals.consumed > 0 ? Math.round(eng.revenueCents / totals.consumed) : null;
   const burnPct = totals.budgeted > 0 ? totals.consumed / totals.budgeted : null;
+  // % completion revenue recognition (firm policy): recognize contract value in
+  // proportion to hours consumed vs. budgeted, capped at 100%. Needs a budget to
+  // compute; with none, nothing is recognized yet.
+  const pctComplete = burnPct != null ? Math.min(1, burnPct) : null;
+  const recognizedRevenueCents = pctComplete != null ? Math.round(eng.revenueCents * pctComplete) : 0;
+  const grossProfitCents = recognizedRevenueCents - totals.consumedCostCents;
+  const realizedRateCents = totals.consumed > 0 ? Math.round(eng.revenueCents / totals.consumed) : null;
 
   return {
     engagementId: eng.id,
     clientName: eng.clientName,
     revenueCents: eng.revenueCents,
+    revenueRecognition: eng.revenueRecognition,
+    pctComplete,
+    recognizedRevenueCents,
     lines,
     totals,
     grossProfitCents,
     realizedRateCents,
     burnPct,
     overBudget: totals.budgeted > 0 && totals.consumed > totals.budgeted,
+  };
+}
+
+// ── Director economics (par bonus = share of declared revenue) ──────────────
+
+export type DirectorEconomics = {
+  declaredRevenueCents: number;
+  baseCents: number;
+  basePct: number | null; // base ÷ declared revenue
+  parBonusCents: number; // declared revenue × parBonusPct
+  parBonusPct: number;
+  onTargetCents: number; // base + par bonus
+  onTargetPct: number | null; // (base + par) ÷ declared revenue
+};
+
+/** Compute a portfolio director's base/par/on-target economics. Pure. */
+export function directorEconomics(p: {
+  declaredPortfolioRevenueCents: number;
+  directorCostCentsAnnual: number;
+  parBonusPct: number;
+}): DirectorEconomics {
+  const declared = p.declaredPortfolioRevenueCents;
+  const parBonusCents = Math.round(declared * p.parBonusPct);
+  const onTargetCents = p.directorCostCentsAnnual + parBonusCents;
+  return {
+    declaredRevenueCents: declared,
+    baseCents: p.directorCostCentsAnnual,
+    basePct: declared > 0 ? p.directorCostCentsAnnual / declared : null,
+    parBonusCents,
+    parBonusPct: p.parBonusPct,
+    onTargetCents,
+    onTargetPct: declared > 0 ? onTargetCents / declared : null,
   };
 }

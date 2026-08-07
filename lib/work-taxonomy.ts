@@ -92,3 +92,14 @@ export function upcomingWeeks(count: number, from?: Date): string[] {
 export function centsToUsd(cents: number): string {
   return (cents / 100).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
+
+// ── Director economics + booking policy (firm defaults) ─────────────────────
+
+/** Par bonus as a share of declared portfolio revenue (5%). */
+export const PAR_BONUS_PCT_DEFAULT = 0.05;
+/** Target director base as a share of declared revenue (5%); base + par ≈ 10%. */
+export const DIRECTOR_BASE_PCT_TARGET = 0.05;
+
+/** Release cutoff: a Confirmed booking can be released uncharged until this
+ *  point in the prior week. Used by the Phase-2 hoteling board. */
+export const RELEASE_CUTOFF = { weekday: "Wednesday", hour: 17, minute: 0, timezone: "America/New_York" } as const;

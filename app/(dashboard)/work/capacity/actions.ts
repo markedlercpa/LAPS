@@ -12,7 +12,7 @@ import {
   ensureRoleBandsSeeded,
 } from "@/lib/work/capacity";
 import { logTime, deleteTimeEntry } from "@/lib/work/time";
-import { ENGAGEMENT_TYPES, REVENUE_RECOGNITION } from "@/lib/work-taxonomy";
+import { ENGAGEMENT_TYPES } from "@/lib/work-taxonomy";
 
 async function requireUser() {
   const session = await auth();
@@ -28,6 +28,7 @@ const resourceSchema = z.object({
   weeklyCapacityHours: z.coerce.number().min(0).max(80).default(40),
   skillTags: z.array(z.string()).default([]),
   location: z.string().optional(),
+  costExempt: z.coerce.boolean().default(false),
 });
 
 export async function createResourceAction(input: unknown) {
@@ -77,7 +78,6 @@ const engagementSchema = z.object({
   clientName: z.string().min(1, "Client name is required"),
   engagementType: z.enum(ENGAGEMENT_TYPES).default("other"),
   revenue: z.coerce.number().min(0).default(0),
-  revenueRecognition: z.enum(REVENUE_RECOGNITION).default("fixed_on_completion"),
   startWeek: z.string().optional(),
   endWeek: z.string().optional(),
 });
@@ -87,12 +87,13 @@ export async function createEngagementAction(input: unknown) {
   if (!userId) return { ok: false as const, error: "Not signed in" };
   const parsed = engagementSchema.safeParse(input);
   if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  // Firm policy: all engagements recognize revenue on % of completion.
   const e = await createEngagement({
     portfolioId: parsed.data.portfolioId,
     clientName: parsed.data.clientName,
     engagementType: parsed.data.engagementType,
     revenueCents: dollarsToCents(parsed.data.revenue),
-    revenueRecognition: parsed.data.revenueRecognition,
+    revenueRecognition: "pct_hours",
     startWeek: parsed.data.startWeek || null,
     endWeek: parsed.data.endWeek || null,
     createdBy: userId,

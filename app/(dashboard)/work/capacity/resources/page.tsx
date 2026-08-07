@@ -41,7 +41,10 @@ export default async function ResourcesPage() {
               <tr key={r.id}>
                 <td className="font-heading font-extrabold">{r.personName}</td>
                 <td className="text-muted">{r.email}</td>
-                <td>{r.roleBand.name}</td>
+                <td>
+                  {r.roleBand.name}
+                  {r.costExempt && <span className="tag tag-accent ml-2">Director · $0</span>}
+                </td>
                 <td className="num">{Number(r.weeklyCapacityHours)}h</td>
                 <td className="text-muted">{r.skillTags.join(", ") || "—"}</td>
                 <td>

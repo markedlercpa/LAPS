@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { NewPortfolioButton } from "@/components/work/new-portfolio";
+import { directorEconomics } from "@/lib/work/capacity";
 import { centsToUsd } from "@/lib/work-taxonomy";
 
 export const dynamic = "force-dynamic";
@@ -30,20 +31,37 @@ export default async function PortfoliosPage() {
               <th>Portfolio</th>
               <th>Director</th>
               <th className="num">Declared revenue</th>
-              <th className="num">GP target</th>
+              <th className="num">Base (%)</th>
+              <th className="num">Par bonus (5%)</th>
+              <th className="num">On-target</th>
               <th className="num">Engagements</th>
             </tr>
           </thead>
           <tbody>
-            {portfolios.map((p) => (
-              <tr key={p.id}>
-                <td className="font-heading font-extrabold">{p.name}</td>
-                <td className="text-muted">{p.directorName}</td>
-                <td className="num">{centsToUsd(p.declaredPortfolioRevenueCents)}</td>
-                <td className="num">{Math.round(Number(p.gpTargetPct) * 100)}%</td>
-                <td className="num">{p._count.engagements}</td>
-              </tr>
-            ))}
+            {portfolios.map((p) => {
+              const de = directorEconomics({
+                declaredPortfolioRevenueCents: p.declaredPortfolioRevenueCents,
+                directorCostCentsAnnual: p.directorCostCentsAnnual,
+                parBonusPct: Number(p.parBonusPct),
+              });
+              return (
+                <tr key={p.id}>
+                  <td className="font-heading font-extrabold">{p.name}</td>
+                  <td className="text-muted">{p.directorName}</td>
+                  <td className="num">{centsToUsd(p.declaredPortfolioRevenueCents)}</td>
+                  <td className="num">
+                    {centsToUsd(de.baseCents)}
+                    {de.basePct != null && <span className="text-muted"> · {Math.round(de.basePct * 100)}%</span>}
+                  </td>
+                  <td className="num">{centsToUsd(de.parBonusCents)}</td>
+                  <td className="num">
+                    {centsToUsd(de.onTargetCents)}
+                    {de.onTargetPct != null && <span className="text-muted"> · {Math.round(de.onTargetPct * 100)}%</span>}
+                  </td>
+                  <td className="num">{p._count.engagements}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

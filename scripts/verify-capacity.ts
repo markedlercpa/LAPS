@@ -13,6 +13,7 @@ import {
   replaceEngagementBudget,
   engagementEconomics,
   deriveLoadedRateCents,
+  directorEconomics,
 } from "@/lib/work/capacity";
 import { isoWeekOf, isoWeekStart } from "@/lib/work-taxonomy";
 import { logTime, deleteTimeEntry } from "@/lib/work/time";
@@ -73,16 +74,32 @@ async function main() {
   // Re-log so economics below see 10h.
   await logTime({ resourceId: res.id, engagementId: eng.id, workDate: "2026-08-10", hours: 6 });
 
-  // Economics: 10h Associate @ $90 = $900 consumed cost.
+  // Economics: 10h Associate @ $90 = $900 consumed cost. Budget total 120h →
+  // 10/120 ≈ 8.3% complete → recognized = $40,000 × 8.3% = $3,333.33.
   const econ = (await engagementEconomics(eng.id))!;
-  console.log(`economics: consumed=${econ.totals.consumed}h cost=${(econ.totals.consumedCostCents / 100).toFixed(2)} GP=${(econ.grossProfitCents / 100).toFixed(2)} realized=${econ.realizedRateCents}`);
+  console.log(`economics: consumed=${econ.totals.consumed}h cost=$${(econ.totals.consumedCostCents / 100).toFixed(2)} pct=${econ.pctComplete} recognized=$${(econ.recognizedRevenueCents / 100).toFixed(2)} GP=$${(econ.grossProfitCents / 100).toFixed(2)}`);
   if (econ.totals.consumedCostCents !== 90000) throw new Error(`consumed cost should be $900, got ${econ.totals.consumedCostCents}`);
-  if (econ.grossProfitCents !== 40_000_00 - 90000) throw new Error("engagement GP wrong");
+  const expectedRecognized = Math.round(40_000_00 * (10 / 120));
+  if (econ.recognizedRevenueCents !== expectedRecognized) throw new Error(`recognized revenue wrong: ${econ.recognizedRevenueCents} vs ${expectedRecognized}`);
+  if (econ.grossProfitCents !== expectedRecognized - 90000) throw new Error("recognized GP wrong");
   if (econ.realizedRateCents !== Math.round(40_000_00 / 10)) throw new Error("realized rate wrong");
-  const assocLine = econ.lines.find((l) => l.band === "Associate")!;
-  if (assocLine.budgetedHours !== 100 || assocLine.consumedHours !== 10) throw new Error("band line wrong");
+
+  // Cost-exempt director: logs 5h on the same engagement → hours rise to 15 but
+  // consumed cost stays $900 (director carried on the portfolio, not per-hour).
+  const dir = await prisma.poolResource.create({ data: { personName: "Maher", email: "maher@example.com", roleBandId: mgr.id, costExempt: true } });
+  await logTime({ resourceId: dir.id, engagementId: eng.id, workDate: "2026-08-11", hours: 5 });
+  const econ2 = (await engagementEconomics(eng.id))!;
+  console.log(`with director: consumed=${econ2.totals.consumed}h (15) cost=$${(econ2.totals.consumedCostCents / 100).toFixed(2)} (still 900)`);
+  if (econ2.totals.consumed !== 15) throw new Error("director hours not counted");
+  if (econ2.totals.consumedCostCents !== 90000) throw new Error("director hours should cost $0");
+
+  // Director economics: $2.4M book, $120k base, 5% par → base 5%, on-target 10%.
+  const de = directorEconomics({ declaredPortfolioRevenueCents: 240_000_000, directorCostCentsAnnual: 12_000_000, parBonusPct: 0.05 });
+  console.log(`director econ: base%=${de.basePct} parBonus=$${(de.parBonusCents / 100).toLocaleString()} onTarget%=${de.onTargetPct}`);
+  if (de.parBonusCents !== 12_000_000 || de.basePct !== 0.05 || de.onTargetPct !== 0.1) throw new Error("director economics wrong");
 
   // Cleanup.
+  await prisma.poolResource.delete({ where: { id: dir.id } }).catch(() => {});
   await prisma.portfolio.delete({ where: { id: pf.id } }).catch(() => {});
   await prisma.poolResource.delete({ where: { id: res.id } }).catch(() => {});
   console.log("cleaned up throwaway rows");

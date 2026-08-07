@@ -1335,6 +1335,7 @@ model PoolResource {
   weeklyCapacityHours Decimal  @default(40) @db.Decimal(5, 2)
   skillTags           String[]
   location            String?
+  costExempt          Boolean  @default(false) // directors: hours count, but cost $0 (base carried on the portfolio)
   active              Boolean  @default(true)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
@@ -1356,6 +1357,7 @@ model Portfolio {
   directorCostCentsAnnual     Int      @default(0)
   declaredPortfolioRevenueCents Int    @default(0)
   gpTargetPct                 Decimal  @default(0.50) @db.Decimal(5, 4)
+  parBonusPct                 Decimal  @default(0.05) @db.Decimal(5, 4) // par bonus as a share of declared revenue
   bonusCliffBandPct           Decimal  @default(0.20) @db.Decimal(5, 4)
   directorBillableFloorPct    Decimal  @default(0.45) @db.Decimal(5, 4)
   active                      Boolean  @default(true)
@@ -1377,7 +1379,7 @@ model PortfolioEngagement {
   clientName          String
   engagementType      String   @default("other") // qoe | cas_monthly | tax | advisory | other
   revenueCents        Int      @default(0)
-  revenueRecognition  String   @default("fixed_on_completion") // fixed_on_completion | monthly | pct_hours
+  revenueRecognition  String   @default("pct_hours") // pct_hours | fixed_on_completion | monthly
   startWeek           String? // ISO week e.g. 2026-W33
   endWeek             String?
   status              String   @default("planned") // planned | active | on_hold | complete

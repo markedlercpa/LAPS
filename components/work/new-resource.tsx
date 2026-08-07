@@ -28,6 +28,7 @@ export function NewResourceButton({ bands }: { bands: { id: string; name: string
         weeklyCapacityHours: fd.get("weeklyCapacityHours"),
         skillTags: tags,
         location: fd.get("location") || undefined,
+        costExempt: fd.get("costExempt") === "on",
       });
       if (res.ok) {
         setOpen(false);
@@ -69,6 +70,13 @@ export function NewResourceButton({ bands }: { bands: { id: string; name: string
           <label className="field">
             <span className="micro-label">Location (optional)</span>
             <input name="location" className="input" placeholder="LatAm / US" />
+          </label>
+          <label className="flex items-start gap-2 text-[13px]">
+            <input name="costExempt" type="checkbox" className="mt-0.5" />
+            <span>
+              Director (cost-exempt) — hours are tracked for the billable floor, but charge $0; their base comp is
+              carried as the portfolio's director-cost line.
+            </span>
           </label>
           <div className="field">
             <span className="micro-label">Skill tags</span>
