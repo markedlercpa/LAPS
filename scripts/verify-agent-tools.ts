@@ -53,6 +53,27 @@ async function main() {
   await prisma.actionItem.delete({ where: { id: taskId } });
   console.log(`  cleaned up throwaway task ${taskId}`);
 
+  console.log("\nWRITE TOOLS (ctx-based lead round-trip: create → update → delete)");
+  const cl = await run(
+    "create_lead",
+    { firstName: "ZZZThrowaway", lastName: "AgentTest", companyName: "Acme MCP", email: "throwaway-mcp@example.com" },
+    ctx,
+  );
+  if (!cl.ok || typeof cl.id !== "string") throw new Error("create_lead failed");
+  const leadId = cl.id;
+  const owned = await prisma.lead.findUnique({ where: { id: leadId }, select: { ownerId: true, companyName: true } });
+  console.log(`  created lead ${leadId} ownerId=${owned?.ownerId} (expect ${ctx.userId})`);
+  if (owned?.ownerId !== ctx.userId) throw new Error("ownership not set to ctx user");
+
+  const upd = await run("update_lead", { id: leadId, companyName: "Acme MCP (renamed)" }, ctx);
+  if (!upd.ok) throw new Error("update_lead failed");
+  const after = await prisma.lead.findUnique({ where: { id: leadId }, select: { companyName: true } });
+  console.log(`  updated company → ${after?.companyName}`);
+  if (after?.companyName !== "Acme MCP (renamed)") throw new Error("update_lead did not persist");
+
+  await prisma.lead.delete({ where: { id: leadId } });
+  console.log(`  cleaned up throwaway lead ${leadId}`);
+
   console.log("\n✅ agent tools smoke passed");
 }
 

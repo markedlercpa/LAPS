@@ -1,18 +1,9 @@
 import type Anthropic from "@anthropic-ai/sdk";
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import type { Stage } from "@prisma/client";
-import {
-  createLead,
-  updateLead,
-  updateLeadStage,
-  logActivity,
-  sendLeadEmail,
-} from "@/app/(dashboard)/leads/actions";
-import {
-  createAppointment,
-  deleteAppointment,
-} from "@/app/(dashboard)/appointments/actions";
+import type { Stage, ActivityType, Direction } from "@prisma/client";
 import { createBooking } from "@/lib/booking";
+import { sendMailAsUser, graphConfigured, deleteCalendarEvent } from "@/lib/graph";
 
 /**
  * LAPS-native tools for the embedded chat agent. Reads run inline in the agent
@@ -42,6 +33,19 @@ export type AgentTool = {
 };
 
 const STAGES: Stage[] = ["NEW", "APPOINTMENT", "PROPOSAL", "CLOSED_WON", "CLOSED_LOST"];
+
+/**
+ * Best-effort cache revalidation. `revalidatePath` throws outside a Next
+ * request store (e.g. the MCP route's tool-execution context, or a script), and
+ * refreshing a page cache must never fail a data write — so swallow that error.
+ */
+function safeRevalidate(path: string): void {
+  try {
+    revalidatePath(path);
+  } catch {
+    /* no request store — the write already succeeded */
+  }
+}
 
 function str(input: Record<string, unknown>, key: string): string | undefined {
   const v = input[key];
@@ -317,7 +321,25 @@ const createLeadTool: AgentTool = {
     `Create lead “${str(i, "firstName") ?? ""} ${str(i, "lastName") ?? ""}”${
       str(i, "companyName") ? ` at ${str(i, "companyName")}` : ""
     }${str(i, "email") ? ` (${str(i, "email")})` : ""}.`,
-  run: async (input) => createLead(input) as Promise<ToolResult>,
+  run: async (input, ctx) => {
+    const firstName = str(input, "firstName");
+    const lastName = str(input, "lastName");
+    if (!firstName || !lastName) return { ok: false, error: "First and last name are required." };
+    const lead = await prisma.lead.create({
+      data: {
+        firstName,
+        lastName,
+        companyName: str(input, "companyName") ?? null,
+        leadSource: str(input, "leadSource") ?? null,
+        email: str(input, "email") ?? null,
+        phone: str(input, "phone") ?? null,
+        notes: str(input, "notes") ?? null,
+        ownerId: ctx.userId,
+      },
+    });
+    safeRevalidate("/leads");
+    return { ok: true, id: lead.id };
+  },
 };
 
 const updateLeadTool: AgentTool = {
@@ -344,9 +366,17 @@ const updateLeadTool: AgentTool = {
     return `Update lead ${str(i, "id")}: change ${fields.join(", ") || "nothing"}.`;
   },
   run: async (input) => {
-    const { id, ...rest } = input;
-    if (typeof id !== "string") return { ok: false, error: "Missing lead id." };
-    return updateLead(id, rest) as Promise<ToolResult>;
+    const id = str(input, "id");
+    if (!id) return { ok: false, error: "Missing lead id." };
+    const data: Record<string, string | null> = {};
+    for (const k of ["firstName", "lastName", "companyName", "email", "phone", "leadSource", "notes"]) {
+      if (k in input) data[k] = str(input, k) ?? null;
+    }
+    if (Object.keys(data).length === 0) return { ok: false, error: "No fields to update." };
+    await prisma.lead.update({ where: { id }, data });
+    safeRevalidate(`/leads/${id}`);
+    safeRevalidate("/leads");
+    return { ok: true, id };
   },
 };
 
@@ -368,7 +398,10 @@ const updateLeadStageTool: AgentTool = {
     const id = str(input, "id");
     const stage = str(input, "stage");
     if (!id || !stage || !STAGES.includes(stage as Stage)) return { ok: false, error: "Invalid id or stage." };
-    return updateLeadStage(id, stage as Stage) as Promise<ToolResult>;
+    await prisma.lead.update({ where: { id }, data: { stage: stage as Stage } });
+    safeRevalidate(`/leads/${id}`);
+    safeRevalidate("/leads");
+    return { ok: true, id };
   },
 };
 
@@ -424,7 +457,25 @@ const logActivityTool: AgentTool = {
     `Log ${str(i, "type")} activity on lead ${str(i, "leadId")}${
       str(i, "subject") ? `: “${str(i, "subject")}”` : ""
     }.`,
-  run: async (input) => logActivity(input) as Promise<ToolResult>,
+  run: async (input, ctx) => {
+    const leadId = str(input, "leadId");
+    const type = str(input, "type");
+    const allowed = ["CALL", "TEXT", "NOTE", "MEETING", "OTHER"];
+    if (!leadId || !type || !allowed.includes(type)) return { ok: false, error: "leadId and a valid type are required." };
+    const direction = str(input, "direction") === "IN" ? "IN" : "OUT";
+    await prisma.activity.create({
+      data: {
+        leadId,
+        userId: ctx.userId,
+        type: type as ActivityType,
+        direction: direction as Direction,
+        subject: str(input, "subject") ?? null,
+        body: str(input, "body") ?? null,
+      },
+    });
+    safeRevalidate(`/leads/${leadId}`);
+    return { ok: true };
+  },
 };
 
 const createAppointmentTool: AgentTool = {
@@ -445,7 +496,28 @@ const createAppointmentTool: AgentTool = {
   },
   confirmSummary: (i) =>
     `Create appointment “${str(i, "title")}” for lead ${str(i, "leadId")} at ${str(i, "scheduledAt")}.`,
-  run: async (input) => createAppointment(input) as Promise<ToolResult>,
+  run: async (input, ctx) => {
+    const leadId = str(input, "leadId");
+    const title = str(input, "title");
+    const scheduledAtRaw = str(input, "scheduledAt");
+    if (!leadId || !title || !scheduledAtRaw) return { ok: false, error: "leadId, title, and scheduledAt are required." };
+    const scheduledAt = new Date(scheduledAtRaw);
+    if (Number.isNaN(scheduledAt.getTime())) return { ok: false, error: "Invalid scheduledAt." };
+    const durationMin = Number(input.durationMin) > 0 ? Math.floor(Number(input.durationMin)) : 30;
+    const appt = await prisma.appointment.create({
+      data: {
+        leadId,
+        ownerId: ctx.userId,
+        title,
+        scheduledAt,
+        durationMin,
+        notes: str(input, "notes") ?? null,
+      },
+    });
+    await prisma.lead.updateMany({ where: { id: leadId, stage: "NEW" }, data: { stage: "APPOINTMENT" } });
+    safeRevalidate("/appointments");
+    return { ok: true, id: appt.id };
+  },
 };
 
 const bookCallTool: AgentTool = {
@@ -522,7 +594,31 @@ const sendEmailTool: AgentTool = {
     required: ["leadId", "to", "subject", "body"],
   },
   confirmSummary: (i) => `Send email to ${str(i, "to")} — “${str(i, "subject")}”.`,
-  run: async (input) => sendLeadEmail(input) as Promise<ToolResult>,
+  run: async (input, ctx) => {
+    const leadId = str(input, "leadId");
+    const to = str(input, "to");
+    const subject = str(input, "subject");
+    const body = str(input, "body");
+    if (!leadId || !to || !subject || !body) return { ok: false, error: "leadId, to, subject, and body are required." };
+    const html = body.replace(/\n/g, "<br/>");
+    if (graphConfigured()) {
+      const sent = await sendMailAsUser({ userId: ctx.userId, to, subject, html });
+      if (!sent.ok) return { ok: false, error: sent.error ?? "Failed to send." };
+    }
+    await prisma.activity.create({
+      data: {
+        leadId,
+        userId: ctx.userId,
+        type: "EMAIL_SENT",
+        direction: "OUT",
+        subject,
+        body,
+        metadata: { channel: graphConfigured() ? "graph" : "offline-log" },
+      },
+    });
+    safeRevalidate(`/leads/${leadId}`);
+    return { ok: true, offline: !graphConfigured() };
+  },
 };
 
 const deleteAppointmentTool: AgentTool = {
@@ -539,7 +635,17 @@ const deleteAppointmentTool: AgentTool = {
   run: async (input) => {
     const id = str(input, "id");
     if (!id) return { ok: false, error: "Missing appointment id." };
-    return deleteAppointment(id) as Promise<ToolResult>;
+    const appt = await prisma.appointment.findUnique({
+      where: { id },
+      select: { ownerId: true, graphEventId: true },
+    });
+    if (!appt) return { ok: false, error: "Appointment not found." };
+    if (appt.graphEventId && appt.ownerId) {
+      await deleteCalendarEvent(appt.ownerId, appt.graphEventId);
+    }
+    await prisma.appointment.delete({ where: { id } });
+    safeRevalidate("/appointments");
+    return { ok: true };
   },
 };
 

@@ -39,6 +39,7 @@ model User {
   activities   Activity[]
   actionItems  ActionItem[]   @relation("ActionItemAssignee")
   bookingHost  BookingHost?
+  mcpTokens    McpToken[]
 }
 
 model Account {
@@ -790,4 +791,20 @@ model BookingEventType {
 
   @@unique([hostId, slug])
   @@index([hostId])
+}
+
+/// A bearer token that lets an external Claude MCP connector act as one LAPS
+/// user. Only the SHA-256 hash of the token is stored; the raw value is shown
+/// once at creation. Revoke by setting revokedAt.
+model McpToken {
+  id         String    @id @default(cuid())
+  name       String
+  tokenHash  String    @unique
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+
+  @@index([userId])
 }
