@@ -48,6 +48,21 @@ const importQboSchema = z.object({
   budgetName: z.string().optional(),
 });
 
+/** List the QBO budgets available for an entity (name + the fiscal years each covers). */
+export async function listQboBudgetsAction(entityId: string) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const { pullBudget } = await import("@/lib/pace/qbo");
+  const budgets = await pullBudget(entityId);
+  if (!budgets) return { ok: false as const, error: "QBO not connected for this entity, or the pull failed." };
+  return {
+    ok: true as const,
+    budgets: budgets.map((b) => ({
+      name: b.name,
+      years: Array.from(new Set(b.lines.map((l) => Number(l.month.slice(0, 4))))).sort((a, z) => z - a),
+    })),
+  };
+}
+
 export async function importQboBudgetAction(input: unknown) {
   if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
   const parsed = importQboSchema.safeParse(input);
