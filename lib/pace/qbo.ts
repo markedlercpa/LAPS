@@ -267,11 +267,81 @@ export async function pullTrialBalance(entityId: string, periodMonthISO: string)
       return null;
     }
     const report = (await res.json()) as QboReport;
-    return parseTrialBalance(report);
+    const rows = parseTrialBalance(report);
+    // Enrich with account numbers from the Account list (the TB report carries
+    // only id + name), so the source COA sorts and reads by account number.
+    const accts = await fetchAccountMap(auth);
+    if (accts) {
+      for (const r of rows) {
+        const meta = r.externalId ? accts.get(r.externalId) : undefined;
+        if (meta?.acctNum) r.acctNum = meta.acctNum;
+      }
+    }
+    return rows;
   } catch (err) {
     console.error("QBO pullTrialBalance error:", err);
     return null;
   }
+}
+
+// ── Account list (for numbers + the mapping queue) ──────────────────────────
+type QboAccount = { Id?: string; Name?: string; AcctNum?: string; AccountType?: string; Active?: boolean };
+type QboAccountResponse = { QueryResponse?: { Account?: QboAccount[] } };
+
+/** Fetch id → { acctNum, name, type } for a company's chart of accounts. */
+async function fetchAccountMap(
+  auth: { token: string; realmId: string },
+): Promise<Map<string, { acctNum?: string; name: string; type?: string; active: boolean }> | null> {
+  const query = encodeURIComponent("select * from Account maxresults 1000");
+  const url = `${apiBase()}/v3/company/${auth.realmId}/query?query=${query}&minorversion=70`;
+  try {
+    const res = await fetchWithRetry(url, { headers: { Authorization: `Bearer ${auth.token}`, Accept: "application/json" } });
+    if (!res.ok) {
+      console.error("QBO Account query failed:", res.status);
+      return null;
+    }
+    const payload = (await res.json()) as QboAccountResponse;
+    const list = payload?.QueryResponse?.Account ?? [];
+    const map = new Map<string, { acctNum?: string; name: string; type?: string; active: boolean }>();
+    for (const a of list) {
+      if (!a.Id) continue;
+      map.set(a.Id, { acctNum: a.AcctNum || undefined, name: a.Name || a.Id, type: a.AccountType, active: a.Active !== false });
+    }
+    return map;
+  } catch (err) {
+    console.error("QBO fetchAccountMap error:", err);
+    return null;
+  }
+}
+
+/**
+ * Sync a QBO company's chart of accounts into LedgerAccounts (name + account
+ * number + type), preserving any existing reporting-COA mapping. This seeds the
+ * COA-mapping queue so a budget/actuals import has accounts to map to. Returns
+ * the count synced, or null when not connected.
+ */
+export async function syncLedgerAccounts(entityId: string): Promise<number | null> {
+  const auth = await getAccessToken(entityId);
+  if (!auth) return null;
+  const accts = await fetchAccountMap(auth);
+  if (!accts) return null;
+  let n = 0;
+  for (const [qboId, meta] of accts) {
+    await prisma.ledgerAccount.upsert({
+      where: { entityId_externalId: { entityId, externalId: qboId } },
+      update: { name: meta.name, acctNum: meta.acctNum ?? null, sourceType: meta.type ?? null, active: meta.active },
+      create: {
+        entityId,
+        externalId: qboId,
+        acctNum: meta.acctNum ?? null,
+        name: meta.name,
+        sourceType: meta.type ?? null,
+        active: meta.active,
+      },
+    });
+    n += 1;
+  }
+  return n;
 }
 
 /**

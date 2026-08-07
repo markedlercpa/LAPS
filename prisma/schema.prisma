@@ -1110,8 +1110,9 @@ model LedgerAccount {
   id                       String   @id @default(cuid())
   entityId                 String
   externalId               String? // QBO account id
+  acctNum                  String? // QBO account number (AcctNum), for display + sort
   name                     String
-  sourceType               String?
+  sourceType               String? // QBO AccountType / classification
   mappedReportingAccountId String?
   active                   Boolean  @default(true)
   createdAt                DateTime @default(now())

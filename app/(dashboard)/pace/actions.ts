@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { importTrialBalance, type TbRow } from "@/lib/pace/import";
 import { mapAccount } from "@/lib/pace/coa";
-import { qboConfigured, authorizeUrl, pullTrialBalance } from "@/lib/pace/qbo";
+import { qboConfigured, authorizeUrl, pullTrialBalance, syncLedgerAccounts } from "@/lib/pace/qbo";
 import { ENTITY_KINDS } from "@/lib/pace-taxonomy";
 
 async function requireUser() {
@@ -120,6 +120,28 @@ export async function startQboConnect(entityId: string) {
   const url = await authorizeUrl(entityId);
   if (!url) return { ok: false as const, error: "Could not build the authorize URL." };
   return { ok: true as const, url };
+}
+
+/**
+ * Pull the chart of accounts (with account numbers) from every QBO-connected
+ * entity into the COA-mapping queue. Lets the user map accounts before importing
+ * a budget or actuals, and backfills account numbers on existing accounts.
+ */
+export async function syncQboAccountsAction() {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  if (!qboConfigured()) return { ok: false as const, error: "QuickBooks is not configured." };
+  const conns = await prisma.ledgerConnection.findMany({
+    where: { provider: "QBO", status: "connected" },
+    select: { entityId: true },
+  });
+  if (conns.length === 0) return { ok: false as const, error: "No QBO-connected entities." };
+  let synced = 0;
+  for (const c of conns) {
+    const n = await syncLedgerAccounts(c.entityId);
+    if (n) synced += n;
+  }
+  revalidatePath("/pace/mapping");
+  return { ok: true as const, synced };
 }
 
 export async function triggerQboSync(entityId: string, periodMonth: string) {

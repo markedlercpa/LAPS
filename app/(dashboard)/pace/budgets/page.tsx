@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { NewBudgetButton } from "@/components/pace/new-budget";
 import { ImportQboBudgetButton } from "@/components/pace/import-qbo-budget";
+import { DeleteBudgetButton } from "@/components/pace/delete-budget";
 import { qboConfigured } from "@/lib/pace/qbo";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +57,7 @@ export default async function BudgetsPage() {
               <th>Kind</th>
               <th>Status</th>
               <th className="num">Lines</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -73,6 +75,9 @@ export default async function BudgetsPage() {
                   </span>
                 </td>
                 <td className="num">{b._count.lines}</td>
+                <td className="text-right">
+                  <DeleteBudgetButton budgetId={b.id} label={`${b.entity.name} · ${b.label}`} />
+                </td>
               </tr>
             ))}
           </tbody>

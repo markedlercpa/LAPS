@@ -5,7 +5,7 @@
 import { prisma } from "@/lib/prisma";
 import { ensureReportingCoaSeeded } from "@/lib/pace/coa";
 import { importTrialBalance } from "@/lib/pace/import";
-import { createBudget, saveBudgetLinesBulk, setBudgetStatus } from "@/lib/pace/budgets";
+import { createBudget, saveBudgetLinesBulk, setBudgetStatus, deleteBudget } from "@/lib/pace/budgets";
 import { computeVariance } from "@/lib/pace/variance";
 import { upsertNote, notesForMonth, narrativesConfigured } from "@/lib/pace/narratives";
 
@@ -87,6 +87,17 @@ async function main() {
     throw new Error("QBO budget parser output wrong");
   }
   if (total !== 38000) throw new Error(`QBO budget amounts not coerced (expected 38000, got ${total})`);
+
+  // Delete budget: locked → blocked, unlocked → removed (lines cascade).
+  const delLocked = await deleteBudget(budget.id);
+  console.log(`delete while locked → ok=${delLocked.ok} (expect false)`);
+  if (delLocked.ok) throw new Error("locked budget should not delete");
+  await setBudgetStatus(budget.id, false);
+  const delOk = await deleteBudget(budget.id);
+  const stillThere = await prisma.budget.findUnique({ where: { id: budget.id } });
+  const orphanLines = await prisma.budgetLine.count({ where: { budgetId: budget.id } });
+  console.log(`delete after unlock → ok=${delOk.ok}, budget gone=${!stillThere}, orphan lines=${orphanLines}`);
+  if (!delOk.ok || stillThere || orphanLines !== 0) throw new Error("budget delete did not cascade");
 
   await prisma.entity.delete({ where: { id: entity.id } }).catch(() => {});
   console.log("cleaned up throwaway entity");

@@ -17,6 +17,7 @@ export type TbRow = {
   name: string;
   amount: number; // signed: debit +, credit -
   reportingCode?: string; // optional explicit map hint
+  acctNum?: string; // source account number (QBO AcctNum), for display + sort
 };
 
 const BALANCE_TOLERANCE = 0.01;
@@ -52,12 +53,14 @@ export async function importTrialBalance(input: {
       where: { entityId_externalId: { entityId: input.entityId, externalId } },
       update: {
         name: row.name,
+        ...(row.acctNum ? { acctNum: row.acctNum } : {}),
         // Only set mapping if we resolved one and it isn't already mapped.
         ...(mappedReportingAccountId ? { mappedReportingAccountId } : {}),
       },
       create: {
         entityId: input.entityId,
         externalId,
+        acctNum: row.acctNum ?? null,
         name: row.name,
         mappedReportingAccountId,
       },

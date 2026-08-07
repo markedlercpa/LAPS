@@ -8,6 +8,7 @@ import { mapAccountAction } from "@/app/(dashboard)/pace/actions";
 export type ReportingOption = { id: string; label: string; statement: StatementKind };
 export type LedgerAccountRow = {
   id: string;
+  acctNum: string | null;
   name: string;
   entity: string;
   mappedReportingAccountId: string | null;
@@ -28,6 +29,7 @@ export function MappingTable({ rows, options }: { rows: LedgerAccountRow[]; opti
     <table className="table">
       <thead>
         <tr>
+          <th className="num">Acct #</th>
           <th>Source account</th>
           <th>Entity</th>
           <th>Reporting account</th>
@@ -36,6 +38,7 @@ export function MappingTable({ rows, options }: { rows: LedgerAccountRow[]; opti
       <tbody>
         {rows.map((r) => (
           <tr key={r.id} className={r.mappedReportingAccountId ? "" : "bg-[color-mix(in_srgb,var(--color-accent)_6%,transparent)]"}>
+            <td className="num text-muted">{r.acctNum ?? "—"}</td>
             <td>{r.name}</td>
             <td className="text-muted">{r.entity}</td>
             <td>

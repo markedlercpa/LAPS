@@ -103,6 +103,15 @@ export async function setBudgetStatus(budgetId: string, locked: boolean) {
   return { ok: true as const };
 }
 
+/** Delete a budget version (its lines cascade). Locked budgets must be unlocked first. */
+export async function deleteBudget(budgetId: string) {
+  const budget = await prisma.budget.findUnique({ where: { id: budgetId }, select: { status: true } });
+  if (!budget) return { ok: false as const, error: "Budget not found." };
+  if (budget.status === "LOCKED") return { ok: false as const, error: "Budget is locked — unlock it before deleting." };
+  await prisma.budget.delete({ where: { id: budgetId } });
+  return { ok: true as const };
+}
+
 /** Sum a budget line's amounts over a set of month keys. */
 export function sumMonths(monthly: Record<string, number>, months: string[]): number {
   return months.reduce((s, m) => s + (Number(monthly[m]) || 0), 0);
@@ -115,7 +124,11 @@ export function sumMonths(monthly: Record<string, number>, months: string[]): nu
  * exception queue — never silently dropped, and never block the import.
  */
 export async function importQboBudget(input: { entityId: string; fiscalYear: number; budgetName?: string }) {
-  const { pullBudget } = await import("@/lib/pace/qbo");
+  const { pullBudget, syncLedgerAccounts } = await import("@/lib/pace/qbo");
+  // Pull the QBO chart of accounts first (with account numbers) so every budget
+  // account exists in the mapping queue and carries its number — this is what
+  // makes unmapped accounts visible + mappable rather than silently dropped.
+  await syncLedgerAccounts(input.entityId).catch(() => null);
   const budgets = await pullBudget(input.entityId);
   if (!budgets) return { ok: false as const, error: "QBO not connected for this entity, or the pull failed." };
   if (budgets.length === 0) return { ok: false as const, error: "No budgets found in QuickBooks for this company." };

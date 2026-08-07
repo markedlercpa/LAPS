@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
-import { createBudget, saveBudgetLinesBulk, setBudgetStatus, importQboBudget } from "@/lib/pace/budgets";
+import { createBudget, saveBudgetLinesBulk, setBudgetStatus, deleteBudget, importQboBudget } from "@/lib/pace/budgets";
 import { upsertNote, draftNarrative } from "@/lib/pace/narratives";
 
 async function requireUser() {
@@ -78,6 +78,13 @@ export async function setBudgetStatusAction(budgetId: string, locked: boolean) {
   revalidatePath(`/pace/budgets/${budgetId}`);
   revalidatePath("/pace/budgets");
   return { ok: true as const };
+}
+
+export async function deleteBudgetAction(budgetId: string) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const res = await deleteBudget(budgetId);
+  if (res.ok) revalidatePath("/pace/budgets");
+  return res;
 }
 
 // ── Variance narratives ───────────────────────────────────────────────────
