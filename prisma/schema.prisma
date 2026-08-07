@@ -1061,6 +1061,8 @@ model Entity {
   ledgerAccounts LedgerAccount[]
   periods        TrialBalancePeriod[]
   syncRuns       SyncRun[]
+  budgets        Budget[]
+  varianceNotes  VarianceNote[]
 
   @@index([active])
 }
@@ -1098,6 +1100,8 @@ model ReportingAccount {
   sortOrder   Int           @default(0)
 
   ledgerAccounts LedgerAccount[]
+  budgetLines    BudgetLine[]
+  varianceNotes  VarianceNote[]
 }
 
 /// A source account from an entity's ledger. Unmapped (null reporting account)
@@ -1167,4 +1171,74 @@ model SyncRun {
   entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
 
   @@index([entityId])
+}
+
+// ===========================================================================
+// PACE Phase 2 — Expectations (budgets, budget-vs-actual, variance narratives)
+// Budgets are entered at the firm-standard reporting-COA line so they tie to
+// the statements from Phase 1 with zero mapping. Versioned + lockable.
+// ===========================================================================
+
+enum BudgetKind {
+  ORIGINAL
+  REFORECAST
+  SCENARIO
+}
+
+enum BudgetStatus {
+  DRAFT
+  LOCKED
+}
+
+model Budget {
+  id         String       @id @default(cuid())
+  entityId   String
+  fiscalYear Int
+  label      String // e.g. "FY2026 Original", "Q2 Reforecast", "Downside"
+  kind       BudgetKind   @default(ORIGINAL)
+  status     BudgetStatus @default(DRAFT)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  entity Entity       @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  lines  BudgetLine[]
+
+  @@unique([entityId, fiscalYear, label])
+  @@index([entityId])
+}
+
+/// One budget line per reporting account, holding twelve monthly amounts keyed
+/// by "YYYY-MM" in `monthly` (natural-side positive, like the statements).
+model BudgetLine {
+  id                 String @id @default(cuid())
+  budgetId           String
+  reportingAccountId String
+  monthly            Json   @default("{}") // { "2026-01": 12000, ... }
+
+  budget           Budget           @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  reportingAccount ReportingAccount @relation(fields: [reportingAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([budgetId, reportingAccountId])
+  @@index([budgetId])
+}
+
+/// A one-line explanation attached to a flagged variance (entity + reporting
+/// account + month). May be AI-drafted then human-approved. The monthly
+/// operating review is assembled from these over time.
+model VarianceNote {
+  id                 String   @id @default(cuid())
+  entityId           String
+  reportingAccountId String
+  periodMonth        DateTime @db.Date
+  text               String   @db.Text
+  aiDrafted          Boolean  @default(false)
+  authorId           String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  entity           Entity           @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  reportingAccount ReportingAccount @relation(fields: [reportingAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([entityId, reportingAccountId, periodMonth])
+  @@index([entityId, periodMonth])
 }

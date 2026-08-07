@@ -92,6 +92,19 @@ export async function importTrialBalanceAction(input: unknown) {
   return res;
 }
 
+/** Flip a trial-balance period open/closed (monthly close). */
+export async function setPeriodStatusAction(entityId: string, periodMonthISO: string, closed: boolean) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const month = /^\d{4}-\d{2}$/.test(periodMonthISO) ? `${periodMonthISO}-01` : periodMonthISO;
+  await prisma.trialBalancePeriod.updateMany({
+    where: { entityId, periodMonth: new Date(month) },
+    data: { status: closed ? "CLOSED" : "OPEN" },
+  });
+  revalidatePath("/pace/actuals");
+  revalidatePath("/pace/review");
+  return { ok: true as const };
+}
+
 export async function mapAccountAction(ledgerAccountId: string, reportingAccountId: string | null) {
   if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
   await mapAccount(ledgerAccountId, reportingAccountId);

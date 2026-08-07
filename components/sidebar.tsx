@@ -22,6 +22,9 @@ import {
   ClipboardList,
   Gauge,
   Landmark,
+  Table2,
+  Scale,
+  FileBarChart,
   LogOut,
   type LucideIcon,
 } from "lucide-react";
@@ -92,6 +95,9 @@ const MODULES: Module[] = [
     icon: Gauge,
     items: [
       { href: "/pace/actuals", label: "Actuals", icon: Landmark },
+      { href: "/pace/budgets", label: "Budgets", icon: Table2 },
+      { href: "/pace/variance", label: "Budget vs Actual", icon: Scale },
+      { href: "/pace/review", label: "Operating Review", icon: FileBarChart },
       { href: "/pace/entities", label: "Entities", icon: Boxes },
       { href: "/pace/mapping", label: "COA Mapping", icon: ClipboardList },
     ],
