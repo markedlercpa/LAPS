@@ -18,6 +18,8 @@ import {
   PenLine,
   LineChart,
   Inbox,
+  Boxes,
+  ClipboardList,
   LogOut,
   type LucideIcon,
 } from "lucide-react";
@@ -72,11 +74,20 @@ const MODULES: Module[] = [
       { href: "/settings", label: "Settings", icon: Settings },
     ],
   },
+  {
+    key: "staple",
+    name: "STAPLE",
+    caption: "Delivery",
+    href: "/staple/engagements",
+    icon: Boxes,
+    items: [{ href: "/staple/engagements", label: "Engagements", icon: ClipboardList }],
+  },
 ];
 
 function activeModuleKey(pathname: string): string | null {
   if (pathname.startsWith("/inbox")) return "triage";
   if (pathname.startsWith("/echo")) return "echo";
+  if (pathname.startsWith("/staple")) return "staple";
   if (pathname.startsWith("/home")) return null;
   return "laps"; // pipeline/leads/appointments/proposals/sales/reporting/settings
 }

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Inbox, Radio, Activity, ArrowRight } from "lucide-react";
+import { Inbox, Radio, Activity, Boxes, ArrowRight } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +26,13 @@ const MODULES = [
     icon: Activity,
     body: "Pipeline, leads, appointments, proposals, and reporting — the full lead-to-close sales workflow.",
   },
+  {
+    name: "STAPLE",
+    caption: "Delivery",
+    href: "/staple/engagements",
+    icon: Boxes,
+    body: "Client delivery, stage by stage — Staging, Takeoff, Assemble, Package, Leverage, Evangelize. Won deals land here automatically.",
+  },
 ];
 
 export default function HomePage() {
@@ -36,7 +43,7 @@ export default function HomePage() {
         title="Home"
         description="Pick a module to work in."
       />
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {MODULES.map((m) => {
           const Icon = m.icon;
           return (

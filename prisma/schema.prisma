@@ -33,11 +33,11 @@ model User {
   sessions Session[]
 
   // Ownership relations across the LAPS pipeline
-  leads        Lead[]         @relation("LeadOwner")
-  appointments Appointment[]  @relation("AppointmentOwner")
-  proposals    Proposal[]     @relation("ProposalOwner")
+  leads        Lead[]        @relation("LeadOwner")
+  appointments Appointment[] @relation("AppointmentOwner")
+  proposals    Proposal[]    @relation("ProposalOwner")
   activities   Activity[]
-  actionItems  ActionItem[]   @relation("ActionItemAssignee")
+  actionItems  ActionItem[]  @relation("ActionItemAssignee")
   bookingHost  BookingHost?
   mcpTokens    McpToken[]
 }
@@ -159,16 +159,16 @@ enum AppointmentStatus {
 }
 
 model Appointment {
-  id          String            @id @default(cuid())
-  leadId      String
-  ownerId     String?
-  title       String
-  scheduledAt DateTime
-  durationMin Int               @default(30)
-  status      AppointmentStatus @default(BOOKED)
-  graphEventId String?          @unique
-  notes       String?           @db.Text
-  createdAt   DateTime          @default(now())
+  id           String            @id @default(cuid())
+  leadId       String
+  ownerId      String?
+  title        String
+  scheduledAt  DateTime
+  durationMin  Int               @default(30)
+  status       AppointmentStatus @default(BOOKED)
+  graphEventId String?           @unique
+  notes        String?           @db.Text
+  createdAt    DateTime          @default(now())
 
   // Self-serve booking fields (populated when booked via a public /book page).
   eventTypeId     String?
@@ -263,20 +263,20 @@ model RateCardLevel {
 }
 
 model Proposal {
-  id                   String         @id @default(cuid())
-  hubspotId            String?        @unique
-  leadId               String
-  ownerId              String?
-  title                String
-  status               ProposalStatus @default(DRAFT)
-  estimatedDeliveryCost Decimal       @default(0) @db.Decimal(12, 2)
-  createdAt            DateTime       @default(now())
-  sentAt              DateTime?
-  viewedAt            DateTime?
-  signedAt            DateTime?
-  wonAt               DateTime?
-  lostAt              DateTime?
-  lostReason          String?
+  id                    String         @id @default(cuid())
+  hubspotId             String?        @unique
+  leadId                String
+  ownerId               String?
+  title                 String
+  status                ProposalStatus @default(DRAFT)
+  estimatedDeliveryCost Decimal        @default(0) @db.Decimal(12, 2)
+  createdAt             DateTime       @default(now())
+  sentAt                DateTime?
+  viewedAt              DateTime?
+  signedAt              DateTime?
+  wonAt                 DateTime?
+  lostAt                DateTime?
+  lostReason            String?
 
   // Client-facing document content (shown on the public proposal page)
   coverLetter    String? @db.Text
@@ -284,11 +284,11 @@ model Proposal {
   termsText      String? @db.Text
 
   // Public share + e-signature capability + audit trail
-  publicToken      String? @unique
-  signerName       String?
-  signerEmail      String?
-  signedIp         String?
-  signedUserAgent  String?
+  publicToken     String? @unique
+  signerName      String?
+  signerEmail     String?
+  signedIp        String?
+  signedUserAgent String?
 
   // Payment schedule (stored + displayed now; collection wired in a later phase)
   paymentScheduleType PaymentScheduleType @default(ONE_TIME)
@@ -391,17 +391,17 @@ model SectionSnippet {
 // Firm-level demo library: anonymized SAMPLE deliverables per service line,
 // shown to the client so no proposal goes out without an artifact of the work.
 model DemoTemplate {
-  id            String   @id @default(cuid())
-  key           String   @unique
+  id            String  @id @default(cuid())
+  key           String  @unique
   serviceLine   String
   name          String
   title         String
   subtitle      String?
   metrics       Json // [{ label, value, hint }]
   tables        Json // [{ title, columns:[...], rows:[[...]] }]
-  narrative     String?  @db.Text
-  isPlaceholder Boolean  @default(true)
-  sortOrder     Int      @default(0)
+  narrative     String? @db.Text
+  isPlaceholder Boolean @default(true)
+  sortOrder     Int     @default(0)
 }
 
 // Firm-level brochure / social proof shown on the client proposal page. Single
@@ -539,8 +539,8 @@ model EvidenceRecord {
   lastUsedAt DateTime?
   createdAt  DateTime       @default(now())
 
-  cards        CallingCard[]  @relation("CardEvidence")
-  contentItems ContentItem[]  @relation("ContentEvidence")
+  cards        CallingCard[] @relation("CardEvidence")
+  contentItems ContentItem[] @relation("ContentEvidence")
 
   @@index([type])
   @@index([source])
@@ -619,13 +619,13 @@ model ContentModule {
 
 // A single piece of content. Every item should trace back to evidence.
 model ContentItem {
-  id        String         @id @default(cuid())
-  title     String
-  channel   ContentChannel @default(LINKEDIN)
-  status    ContentStatus  @default(DRAFT)
-  format    String?
-  summary   String?        @db.Text
-  body      String         @db.Text @default("")
+  id         String         @id @default(cuid())
+  title      String
+  channel    ContentChannel @default(LINKEDIN)
+  status     ContentStatus  @default(DRAFT)
+  format     String?
+  summary    String?        @db.Text
+  body       String         @default("") @db.Text
   pillarTags QoOPillar[]
 
   moduleId  String?
@@ -766,26 +766,26 @@ model AvailabilityOverride {
 
 // A bookable meeting type (duration, location, rules, screening questions).
 model BookingEventType {
-  id              String              @id @default(cuid())
-  hostId          String
-  host            BookingHost         @relation(fields: [hostId], references: [id], onDelete: Cascade)
-  slug            String
-  name            String
-  description     String?             @db.Text
-  durationMin     Int                 @default(30)
-  locationType    BookingLocationType @default(ZOOM)
-  location        String? // overrides host zoomLink when set
-  bufferBeforeMin Int                 @default(0)
-  bufferAfterMin  Int                 @default(0)
-  minNoticeMin    Int                 @default(240)
-  rollingDays     Int                 @default(60)
+  id                 String              @id @default(cuid())
+  hostId             String
+  host               BookingHost         @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  slug               String
+  name               String
+  description        String?             @db.Text
+  durationMin        Int                 @default(30)
+  locationType       BookingLocationType @default(ZOOM)
+  location           String? // overrides host zoomLink when set
+  bufferBeforeMin    Int                 @default(0)
+  bufferAfterMin     Int                 @default(0)
+  minNoticeMin       Int                 @default(240)
+  rollingDays        Int                 @default(60)
   windowBusinessDays Int? // when set, cap the window to N business days (overrides rollingDays)
-  maxPerDay       Int?
-  color           String?
-  active          Boolean             @default(true)
-  questions       Json                @default("[]") // [{id,label,type,required}]
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  maxPerDay          Int?
+  color              String?
+  active             Boolean             @default(true)
+  questions          Json                @default("[]") // [{id,label,type,required}]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   appointments Appointment[]
 
@@ -807,4 +807,205 @@ model McpToken {
   revokedAt  DateTime?
 
   @@index([userId])
+}
+
+// ===========================================================================
+// STAPLE — delivery / production module (system of record for delivery)
+// Phase 1: native spine + Staging. Cross-module links (User/Lead/Proposal/
+// Handoff) are scalar id fields, not Prisma relations, so this block is purely
+// additive and self-contained. Relations exist only within STAPLE.
+// ===========================================================================
+
+enum StapleStage {
+  STAGING
+  TAKEOFF
+  ASSEMBLE
+  PACKAGE
+  DELIVERED
+  LEVERAGE
+  EVANGELIZE
+  CLOSED
+}
+
+enum InfoStatus {
+  RECEIVED
+  REQUESTED
+  PROMISED
+  NOT_APPLICABLE
+}
+
+enum InfoSource {
+  SALES_HANDOFF
+  CLIENT_UPLOAD
+  EMAIL
+  KICKOFF
+  PRIOR_ENGAGEMENT
+  MANUAL
+}
+
+enum OwnerSide {
+  US
+  CLIENT
+  THIRD_PARTY
+}
+
+/// A client as delivered-to. Canonical for the delivery domain; may reference
+/// an originating LAPS Lead but never depends on one.
+model StapleClient {
+  id           String   @id @default(cuid())
+  legalName    String
+  dba          String?
+  industry     String?
+  tier         String?
+  ownerId      String? // User id (relationship owner) — scalar link
+  leadId       String?  @unique // originating LAPS Lead — scalar link
+  externalRefs Json? // { hubspotCompanyId?, karbonClientId? }
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  contacts    Contact[]
+  engagements Engagement[]
+  infoItems   InfoItem[]
+
+  @@index([ownerId])
+}
+
+model Contact {
+  id        String   @id @default(cuid())
+  clientId  String
+  name      String
+  email     String?
+  phone     String?
+  role      String? // owner | controller | broker | attorney | lender | other
+  commPrefs Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client StapleClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+}
+
+/// The engagement spine. Runs through the six STAPLE stages.
+model Engagement {
+  id             String      @id @default(cuid())
+  clientId       String
+  serviceLine    String // see lib/staple-taxonomy SERVICE_LINES
+  stage          StapleStage @default(STAGING)
+  ownerId        String? // User id — scalar link
+  preparerId     String? // User id — scalar link
+  reviewerId     String? // User id — scalar link
+  pod            String?
+  proposalId     String?     @unique // originating LAPS Proposal — scalar link
+  handoffId      String?     @unique // originating LAPS Handoff — scalar link
+  leadId         String? // originating LAPS Lead — scalar link
+  accepted       Boolean     @default(false) // delivery-lead accepted the staging handoff
+  acceptedById   String?
+  acceptedAt     DateTime?
+  dealMeta       Json? // { evRange?, dealType?, counterparties?, lender? }
+  handoffSummary Json? // { sold, promised, know, have } structured staging summary
+  targetDates    Json? // { kickoff?, fieldwork?, draft?, delivery? }
+  statusFlags    Json? // { blocked?, atRisk?, overdueInReview? }
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  client      StapleClient      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  terms       EngagementTerms[]
+  infoItems   InfoItem[]
+  files       FileAsset[]
+  transitions StageTransition[]
+
+  @@index([clientId])
+  @@index([stage])
+  @@index([ownerId])
+}
+
+/// Versioned engagement terms — owned by STAPLE, seeded v1 from the won proposal.
+model EngagementTerms {
+  id               String    @id @default(cuid())
+  engagementId     String
+  version          Int
+  title            String?
+  services         Json      @default("[]") // [{ name, deliverable }]
+  fee              Decimal?  @db.Decimal(12, 2)
+  feeType          String?
+  paymentSchedule  Json? // [{ label, amount, dueOn }]
+  timeline         Json? // { commitments }
+  scopeNarrative   String?   @db.Text
+  scopeInclusions  Json      @default("[]")
+  scopeExclusions  Json      @default("[]")
+  mutuallyAgreed   Boolean   @default(false)
+  confirmedAt      DateTime?
+  sourceProposalId String?
+  createdAt        DateTime  @default(now())
+
+  engagement Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  @@unique([engagementId, version])
+  @@index([engagementId])
+}
+
+/// Information Registry item — the "never ask twice" ledger. Client-scoped,
+/// engagement-linked.
+model InfoItem {
+  id           String     @id @default(cuid())
+  clientId     String
+  engagementId String?
+  canonicalKey String?
+  label        String
+  status       InfoStatus @default(REQUESTED)
+  source       InfoSource @default(MANUAL)
+  ownerSide    OwnerSide  @default(CLIENT)
+  fileAssetId  String? // scalar link (avoids circular relation with FileAsset)
+  receivedAt   DateTime?
+  requestedAt  DateTime?
+  notes        String?    @db.Text
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  client     StapleClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  engagement Engagement?  @relation(fields: [engagementId], references: [id], onDelete: SetNull)
+
+  @@index([clientId])
+  @@index([engagementId])
+  @@index([status])
+}
+
+/// Every document received or produced. Bytes live in object storage
+/// (storageKey); null storageKey = metadata-only until S3 is wired.
+model FileAsset {
+  id           String   @id @default(cuid())
+  engagementId String?
+  clientId     String? // scalar link
+  infoItemId   String? // scalar link
+  name         String
+  kind         String?
+  storageKey   String?
+  contentHash  String?
+  sizeBytes    Int?
+  version      Int      @default(1)
+  supersedesId String? // scalar link (prior version)
+  uploadedById String? // User id — scalar link
+  source       String   @default("native") // native | adapter
+  createdAt    DateTime @default(now())
+
+  engagement Engagement? @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  @@index([engagementId])
+  @@index([clientId])
+}
+
+/// Stage-change audit trail — drives cycle-time metrics and gate history.
+model StageTransition {
+  id           String       @id @default(cuid())
+  engagementId String
+  fromStage    StapleStage?
+  toStage      StapleStage
+  byUserId     String?
+  note         String?
+  at           DateTime     @default(now())
+
+  engagement Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  @@index([engagementId])
 }

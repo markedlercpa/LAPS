@@ -87,6 +87,15 @@ export async function markProposalWon(proposalId: string, signer?: Signer) {
     });
   }
 
+  // LAPS → STAPLE seam: spawn a delivery engagement in Staging. Best-effort and
+  // idempotent — a STAPLE failure must never break the won cascade.
+  try {
+    const { createEngagementFromWon } = await import("@/lib/staple/engagements");
+    await createEngagementFromWon(proposalId);
+  } catch (err) {
+    console.error("createEngagementFromWon failed:", err);
+  }
+
   return { ok: true as const };
 }
 
