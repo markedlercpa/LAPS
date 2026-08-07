@@ -100,7 +100,12 @@ export default async function ActualsPage({
                 : "No trial balance loaded for this selection. Use “Import trial balance” to add one."}
             </p>
           ) : (
-            <StatementBlock statement={statement} period={period} consolidated={consolidated} />
+            <StatementBlock
+              statement={statement}
+              period={period}
+              consolidated={consolidated}
+              entityParam={consolidated ? "all" : entitySel}
+            />
           )}
         </>
       )}
@@ -112,11 +117,14 @@ function StatementBlock({
   statement,
   period,
   consolidated,
+  entityParam,
 }: {
   statement: StatementResult;
   period: { balanced: boolean; status: string; source: string } | null;
   consolidated: boolean;
+  entityParam: string;
 }) {
+  const ym = statement.periodMonth.slice(0, 7); // "YYYY-MM"
   const s = statement.subtotals;
   const metrics =
     statement.statement === "IS"
@@ -164,7 +172,15 @@ function StatementBlock({
         <tbody>
           {statement.lines.map((l) => (
             <tr key={l.reportingAccountId}>
-              <td>{l.name}</td>
+              <td>
+                <a
+                  className="text-accent-700"
+                  href={`/pace/ledger?entity=${entityParam}&account=${l.reportingAccountId}&from=${ym}&to=${ym}`}
+                  title="Drill into the transactions behind this line"
+                >
+                  {l.name}
+                </a>
+              </td>
               <td className="text-muted">{l.category ?? l.type}</td>
               <td className="num">{formatCurrency(l.amount)}</td>
             </tr>

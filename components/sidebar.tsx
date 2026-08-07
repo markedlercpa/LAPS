@@ -95,6 +95,7 @@ const MODULES: Module[] = [
     icon: Gauge,
     items: [
       { href: "/pace/actuals", label: "Actuals", icon: Landmark },
+      { href: "/pace/ledger", label: "General Ledger", icon: FileText },
       { href: "/pace/budgets", label: "Budgets", icon: Table2 },
       { href: "/pace/variance", label: "Budget vs Actual", icon: Scale },
       { href: "/pace/review", label: "Operating Review", icon: FileBarChart },

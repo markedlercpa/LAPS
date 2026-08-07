@@ -284,6 +284,129 @@ export async function pullTrialBalance(entityId: string, periodMonthISO: string)
   }
 }
 
+// ── General Ledger (transaction detail) ─────────────────────────────────────
+export type GlLine = {
+  externalAccountId?: string; // QBO account id (section header)
+  accountName?: string;
+  txnDate: string; // "YYYY-MM-DD"
+  txnType?: string;
+  docNumber?: string;
+  name?: string;
+  memo?: string;
+  splitAccount?: string;
+  amount: number; // signed: debit +, credit -
+  externalTxnId?: string;
+};
+
+type QboColumnMeta = { Name?: string; Value?: string };
+type QboColumn = { ColTitle?: string; ColType?: string; MetaData?: QboColumnMeta[] };
+type QboReportFull = { Columns?: { Column?: QboColumn[] }; Rows?: { Row?: QboRow[] } };
+
+/** Build a colKey → index map from the report's Columns (by ColType + ColKey). */
+function columnIndex(columns: QboColumn[]): Record<string, number> {
+  const idx: Record<string, number> = {};
+  columns.forEach((c, i) => {
+    if (c.ColType) idx[c.ColType.toLowerCase()] = i;
+    const key = c.MetaData?.find((m) => m.Name === "ColKey")?.Value;
+    if (key) idx[key.toLowerCase()] = i;
+  });
+  return idx;
+}
+
+/**
+ * Parse a QBO GeneralLedger report into flat, signed GL lines. Columns are
+ * matched by key (order varies), transactions are grouped under account section
+ * headers, and amounts prefer explicit debit/credit columns (debit − credit),
+ * falling back to the single signed natural-amount column. Pure — unit-testable.
+ */
+export function parseGeneralLedger(report: QboReportFull): GlLine[] {
+  const cols = report.Columns?.Column ?? [];
+  const idx = columnIndex(cols);
+  const pick = (keys: string[]): number | undefined => {
+    for (const k of keys) if (idx[k] !== undefined) return idx[k];
+    return undefined;
+  };
+  const iDate = pick(["tx_date"]);
+  const iType = pick(["txn_type"]);
+  const iDoc = pick(["doc_num"]);
+  const iName = pick(["name"]);
+  const iMemo = pick(["memo", "memo_desc"]);
+  const iSplit = pick(["split_acc"]);
+  const iAmt = pick(["subt_nat_amount", "nat_amount", "amount", "subt_nat_home_amount"]);
+  const iDebit = pick(["debt_amt", "debit", "nat_debit"]);
+  const iCredit = pick(["credt_amt", "credit", "nat_credit"]);
+
+  const num = (s?: string) => Number(String(s ?? "").replace(/,/g, "")) || 0;
+  const out: GlLine[] = [];
+
+  const walk = (rows: QboRow[] | undefined, acct: { id?: string; name?: string }) => {
+    for (const r of rows ?? []) {
+      // A section: header names the account; recurse into its rows with that account.
+      const header = (r as { Header?: { ColData?: QboColData[] } }).Header;
+      let current = acct;
+      if (header?.ColData?.length) {
+        const h0 = header.ColData[0];
+        current = { id: h0?.id ?? acct.id, name: h0?.value?.trim() || acct.name };
+      }
+      // A data row: has ColData with a date value.
+      if (r.ColData && iDate !== undefined) {
+        const date = r.ColData[iDate]?.value?.trim();
+        if (date && /^\d{4}-\d{2}-\d{2}/.test(date)) {
+          const amount =
+            iDebit !== undefined || iCredit !== undefined
+              ? num(iDebit !== undefined ? r.ColData[iDebit]?.value : undefined) -
+                num(iCredit !== undefined ? r.ColData[iCredit]?.value : undefined)
+              : num(iAmt !== undefined ? r.ColData[iAmt]?.value : undefined);
+          out.push({
+            externalAccountId: current.id,
+            accountName: current.name,
+            txnDate: date.slice(0, 10),
+            txnType: iType !== undefined ? r.ColData[iType]?.value?.trim() || undefined : undefined,
+            docNumber: iDoc !== undefined ? r.ColData[iDoc]?.value?.trim() || undefined : undefined,
+            name: iName !== undefined ? r.ColData[iName]?.value?.trim() || undefined : undefined,
+            memo: iMemo !== undefined ? r.ColData[iMemo]?.value?.trim() || undefined : undefined,
+            splitAccount: iSplit !== undefined ? r.ColData[iSplit]?.value?.trim() || undefined : undefined,
+            amount,
+            externalTxnId: iType !== undefined ? r.ColData[iType]?.id : r.ColData[iDate]?.id,
+          });
+        }
+      }
+      if (r.Rows?.Row) walk(r.Rows.Row, current);
+    }
+  };
+  walk(report.Rows?.Row, {});
+  return out;
+}
+
+/**
+ * Pull a date range's General Ledger from QBO. Returns flat signed GL lines, or
+ * null when not connected / the pull fails.
+ */
+export async function pullGeneralLedger(entityId: string, startISO: string, endISO: string): Promise<GlLine[] | null> {
+  const auth = await getAccessToken(entityId);
+  if (!auth) return null;
+  const fmt = (iso: string) => iso.slice(0, 10);
+  const url = `${apiBase()}/v3/company/${auth.realmId}/reports/GeneralLedger?start_date=${fmt(startISO)}&end_date=${fmt(endISO)}&minorversion=70`;
+  try {
+    const res = await fetchWithRetry(url, { headers: { Authorization: `Bearer ${auth.token}`, Accept: "application/json" } });
+    if (res.status === 401) {
+      await markNeedsReconnect(entityId);
+      return null;
+    }
+    if (!res.ok) {
+      console.error("QBO GeneralLedger failed:", res.status, await res.text());
+      return null;
+    }
+    const report = (await res.json()) as QboReportFull;
+    const lines = parseGeneralLedger(report);
+    console.error(`QBO pullGeneralLedger ${fmt(startISO)}..${fmt(endISO)}: ${lines.length} GL lines`);
+    return lines;
+  } catch (err) {
+    console.error("QBO pullGeneralLedger error:", err);
+    return null;
+  }
+}
+
 // ── Account list (for numbers + the mapping queue) ──────────────────────────
 type QboAccount = { Id?: string; Name?: string; AcctNum?: string; AccountType?: string; Active?: boolean };
 type QboAccountResponse = { QueryResponse?: { Account?: QboAccount[] } };

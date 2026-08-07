@@ -6,7 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { importTrialBalance, type TbRow } from "@/lib/pace/import";
 import { mapAccount } from "@/lib/pace/coa";
-import { qboConfigured, authorizeUrl, pullTrialBalance, syncLedgerAccounts } from "@/lib/pace/qbo";
+import { qboConfigured, authorizeUrl, pullTrialBalance, pullGeneralLedger, syncLedgerAccounts } from "@/lib/pace/qbo";
+import { importGeneralLedger } from "@/lib/pace/gl";
 import { ENTITY_KINDS } from "@/lib/pace-taxonomy";
 
 async function requireUser() {
@@ -182,6 +183,7 @@ export async function syncQboActualsAction(entityId: string, monthsBack = 24) {
   let imported = 0;
   let empty = 0;
   let failed = 0;
+  let glLines = 0;
   const importedMonths: string[] = [];
   for (const month of months) {
     const rows = await pullTrialBalance(entityId, month);
@@ -201,16 +203,30 @@ export async function syncQboActualsAction(entityId: string, monthsBack = 24) {
     await importTrialBalance({ entityId, periodMonth: month, rows, source: "qbo" });
     imported += 1;
     importedMonths.push(month.slice(0, 7));
+
+    // Also pull the transaction-level general ledger for this month (drill-down
+    // + bottoms-up forecasting). Best-effort: a GL miss never fails the TB sync.
+    const monthStart = new Date(month);
+    const monthEnd = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0))
+      .toISOString()
+      .slice(0, 10);
+    const gl = await pullGeneralLedger(entityId, month, monthEnd).catch(() => null);
+    if (gl && gl.length) {
+      const res = await importGeneralLedger({ entityId, periodMonthISO: month, lines: gl }).catch(() => null);
+      if (res) glLines += res.count;
+    }
   }
 
   revalidatePath("/pace/actuals");
   revalidatePath("/pace/mapping");
   revalidatePath("/pace/review");
+  revalidatePath("/pace/ledger");
   return {
     ok: true as const,
     imported,
     empty,
     failed,
+    glLines,
     firstMonth: importedMonths[0] ?? null,
     lastMonth: importedMonths[importedMonths.length - 1] ?? null,
   };

@@ -1063,6 +1063,7 @@ model Entity {
   syncRuns       SyncRun[]
   budgets        Budget[]
   varianceNotes  VarianceNote[]
+  glLines        GeneralLedgerLine[]
 
   @@index([active])
 }
@@ -1117,9 +1118,10 @@ model LedgerAccount {
   active                   Boolean  @default(true)
   createdAt                DateTime @default(now())
 
-  entity           Entity             @relation(fields: [entityId], references: [id], onDelete: Cascade)
-  reportingAccount ReportingAccount?  @relation(fields: [mappedReportingAccountId], references: [id], onDelete: SetNull)
+  entity           Entity              @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  reportingAccount ReportingAccount?   @relation(fields: [mappedReportingAccountId], references: [id], onDelete: SetNull)
   lines            TrialBalanceLine[]
+  glLines          GeneralLedgerLine[]
 
   @@unique([entityId, externalId])
   @@index([entityId])
@@ -1157,6 +1159,35 @@ model TrialBalanceLine {
 
   @@index([periodId])
   @@index([ledgerAccountId])
+}
+
+/// Transaction-level general ledger, pulled from QBO's GeneralLedger report.
+/// Feeds drill-down (a statement/TB line → the transactions behind it) and
+/// bottoms-up forecasting. Each row is one posting to one account. Amounts are
+/// signed (debit +, credit -) to match the TB convention. Idempotent per month:
+/// a re-sync deletes the entity's lines for that month and re-inserts.
+model GeneralLedgerLine {
+  id              String   @id @default(cuid())
+  entityId        String
+  ledgerAccountId String? // source account (→ reporting COA via its mapping); null if unresolved
+  periodMonth     DateTime @db.Date // first of the txn's month, for fast range filters
+  txnDate         DateTime @db.Date
+  txnType         String? // Invoice | Bill | JournalEntry | Deposit | ...
+  docNumber       String?
+  name            String? // customer / vendor / payee
+  memo            String?  @db.Text
+  splitAccount    String? // the "split" (other side) account label from QBO
+  amount          Decimal  @db.Decimal(14, 2) // signed: debit +, credit -
+  externalTxnId   String? // QBO transaction id, when the report exposes it
+  source          String   @default("qbo")
+  createdAt       DateTime @default(now())
+
+  entity        Entity         @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  ledgerAccount LedgerAccount? @relation(fields: [ledgerAccountId], references: [id], onDelete: SetNull)
+
+  @@index([entityId, periodMonth])
+  @@index([ledgerAccountId])
+  @@index([entityId, txnDate])
 }
 
 /// Audit trail for every sync/import + its data-quality results.

@@ -36,7 +36,8 @@ export function QboSyncButton({ entityId }: { entityId: string }) {
           res.firstMonth && res.lastMonth
             ? ` (${monthLabel(res.firstMonth)} – ${monthLabel(res.lastMonth)})`
             : "";
-        setMsg(`Imported ${res.imported} month${res.imported === 1 ? "" : "s"}${range}.`);
+        const gl = res.glLines ? ` + ${res.glLines.toLocaleString()} GL lines` : "";
+        setMsg(`Imported ${res.imported} month${res.imported === 1 ? "" : "s"}${range}${gl}.`);
       }
       router.refresh();
     });

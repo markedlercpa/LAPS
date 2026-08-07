@@ -88,6 +88,62 @@ async function main() {
   }
   if (total !== 38000) throw new Error(`QBO budget amounts not coerced (expected 38000, got ${total})`);
 
+  // General ledger: parse a GeneralLedger report fixture → import → query.
+  const { parseGeneralLedger } = await import("@/lib/pace/qbo");
+  const col = (title: string, type: string) => ({ ColTitle: title, ColType: type, MetaData: [{ Name: "ColKey", Value: type }] });
+  const glReport = {
+    Columns: {
+      Column: [
+        col("Date", "tx_date"),
+        col("Transaction Type", "txn_type"),
+        col("Num", "doc_num"),
+        col("Name", "name"),
+        col("Memo", "memo"),
+        col("Split", "split_acc"),
+        col("Amount", "subt_nat_amount"),
+        col("Balance", "rbal_nat_amount"),
+      ],
+    },
+    Rows: {
+      Row: [
+        {
+          Header: { ColData: [{ value: "Consulting Income", id: "82" }] },
+          Rows: {
+            Row: [
+              { type: "Data", ColData: [{ value: "2026-07-05" }, { value: "Invoice", id: "1001" }, { value: "1001" }, { value: "Client A", id: "11" }, { value: "July services" }, { value: "Accounts Receivable" }, { value: "-15000.00" }, { value: "-15000.00" }] },
+              { type: "Data", ColData: [{ value: "2026-07-20" }, { value: "Invoice", id: "1002" }, { value: "1002" }, { value: "Client B" }, { value: "" }, { value: "Accounts Receivable" }, { value: "-5,000.00" }, { value: "-20000.00" }] },
+            ],
+          },
+        },
+      ],
+    },
+  };
+  const glLines = parseGeneralLedger(glReport);
+  const glTotal = glLines.reduce((s, l) => s + l.amount, 0);
+  console.log(`parseGeneralLedger → ${glLines.length} lines, acct ${glLines[0]?.externalAccountId}, total $${glTotal}, type "${glLines[0]?.txnType}"`);
+  if (glLines.length !== 2 || glLines[0].externalAccountId !== "82" || glTotal !== -20000 || glLines[1].amount !== -5000) {
+    throw new Error("parseGeneralLedger output wrong");
+  }
+
+  // Import + query round-trip: a source account (externalId 82) mapped to revenue.
+  const { importGeneralLedger, queryGeneralLedger, glMonths } = await import("@/lib/pace/gl");
+  await prisma.ledgerAccount.create({
+    data: { entityId: entity.id, externalId: "82", name: "Consulting Income", acctNum: "4010", mappedReportingAccountId: revId },
+  });
+  const glImp = await importGeneralLedger({ entityId: entity.id, periodMonthISO: MONTH, lines: glLines });
+  console.log(`importGeneralLedger → count=${glImp.count} unresolved=${glImp.unresolved}`);
+  if (glImp.count !== 2 || glImp.unresolved !== 0) throw new Error("GL import did not resolve accounts");
+  const glQ = await queryGeneralLedger({ entityId: entity.id, reportingAccountId: revId, fromMonth: "2026-07", toMonth: "2026-07" });
+  console.log(`queryGeneralLedger(revenue) → ${glQ.count} rows, total $${glQ.total}, first "${glQ.rows[0]?.name}"`);
+  if (glQ.count !== 2 || glQ.total !== -20000) throw new Error("GL query by reporting account wrong");
+  // Idempotent: re-import the same month replaces (still 2, not 4).
+  await importGeneralLedger({ entityId: entity.id, periodMonthISO: MONTH, lines: glLines });
+  const glQ2 = await queryGeneralLedger({ entityId: entity.id, reportingAccountId: revId });
+  if (glQ2.count !== 2) throw new Error("GL re-import should replace the month, not duplicate");
+  const gm = await glMonths(entity.id);
+  console.log(`glMonths → ${gm.join(", ")} (expect 2026-07)`);
+  if (gm[0] !== "2026-07") throw new Error("glMonths wrong");
+
   // Delete budget: locked → blocked, unlocked → removed (lines cascade).
   const delLocked = await deleteBudget(budget.id);
   console.log(`delete while locked → ok=${delLocked.ok} (expect false)`);
