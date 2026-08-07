@@ -274,6 +274,64 @@ export async function pullTrialBalance(entityId: string, periodMonthISO: string)
   }
 }
 
+/**
+ * Pull budgets from QBO (read-only — QBO's Budget API cannot be written).
+ * Returns each budget with its lines normalized to { accountId, accountName,
+ * month "YYYY-MM", amount } (amount as QBO stores it: natural-side positive).
+ * Null when not connected.
+ */
+export type QboBudget = {
+  name: string;
+  lines: { accountId: string; accountName: string; month: string; amount: number }[];
+};
+
+export async function pullBudget(entityId: string): Promise<QboBudget[] | null> {
+  const auth = await getAccessToken(entityId);
+  if (!auth) return null;
+  const query = encodeURIComponent("select * from Budget");
+  const url = `${apiBase()}/v3/company/${auth.realmId}/query?query=${query}&minorversion=70`;
+  try {
+    const res = await fetchWithRetry(url, { headers: { Authorization: `Bearer ${auth.token}`, Accept: "application/json" } });
+    if (res.status === 401) {
+      await markNeedsReconnect(entityId);
+      return null;
+    }
+    if (!res.ok) {
+      console.error("QBO Budget query failed:", res.status, await res.text());
+      return null;
+    }
+    return parseQboBudgets(await res.json());
+  } catch (err) {
+    console.error("QBO pullBudget error:", err);
+    return null;
+  }
+}
+
+type QboBudgetDetail = { BudgetDate?: string; Amount?: number | string; AccountRef?: { value?: string; name?: string } };
+type QboBudgetEntity = { Name?: string; BudgetDetail?: QboBudgetDetail[] };
+type QboQueryResponse = { QueryResponse?: { Budget?: QboBudgetEntity[] } };
+
+/** Pure parser for the QBO Budget query response. */
+export function parseQboBudgets(payload: unknown): QboBudget[] {
+  const budgets = (payload as QboQueryResponse)?.QueryResponse?.Budget ?? [];
+  return budgets.map((b, i) => ({
+    name: b.Name || `QBO Budget ${i + 1}`,
+    lines: (b.BudgetDetail ?? [])
+      .map((d) => {
+        const accountId = d.AccountRef?.value;
+        const date = d.BudgetDate; // "YYYY-MM-DD"
+        if (!accountId || !date) return null;
+        return {
+          accountId,
+          accountName: d.AccountRef?.name || accountId,
+          month: date.slice(0, 7), // "YYYY-MM"
+          amount: Number(d.Amount) || 0,
+        };
+      })
+      .filter((x): x is QboBudget["lines"][number] => x !== null),
+  }));
+}
+
 // ── QBO report parsing ──────────────────────────────────────────────────────
 type QboColData = { value?: string; id?: string };
 type QboRow = { type?: string; ColData?: QboColData[]; Rows?: { Row?: QboRow[] } };

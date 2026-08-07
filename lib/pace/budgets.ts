@@ -107,3 +107,79 @@ export async function setBudgetStatus(budgetId: string, locked: boolean) {
 export function sumMonths(monthly: Record<string, number>, months: string[]): number {
   return months.reduce((s, m) => s + (Number(monthly[m]) || 0), 0);
 }
+
+/**
+ * Import a QBO budget into a new PACE budget version. QBO budget accounts are
+ * mapped to the reporting COA via the existing LedgerAccount mapping (the same
+ * one Actuals uses). Unmapped accounts are skipped and ensured present in the
+ * exception queue — never silently dropped, and never block the import.
+ */
+export async function importQboBudget(input: { entityId: string; fiscalYear: number; budgetName?: string }) {
+  const { pullBudget } = await import("@/lib/pace/qbo");
+  const budgets = await pullBudget(input.entityId);
+  if (!budgets) return { ok: false as const, error: "QBO not connected for this entity, or the pull failed." };
+  if (budgets.length === 0) return { ok: false as const, error: "No budgets found in QuickBooks for this company." };
+
+  const chosen = input.budgetName ? budgets.find((b) => b.name === input.budgetName) ?? budgets[0] : budgets[0];
+  const yearLines = chosen.lines.filter((l) => l.month.startsWith(String(input.fiscalYear)));
+  if (yearLines.length === 0) {
+    return { ok: false as const, error: `QBO budget "${chosen.name}" has no lines for FY${input.fiscalYear}.` };
+  }
+
+  // Resolve each QBO account → reporting account via the entity's ledger map,
+  // ensuring an (unmapped) LedgerAccount exists for anything new.
+  const existing = await prisma.ledgerAccount.findMany({ where: { entityId: input.entityId } });
+  const byExternal = new Map(existing.map((a) => [a.externalId, a]));
+
+  const monthlyByReporting = new Map<string, Record<string, number>>();
+  let imported = 0;
+  let skipped = 0;
+  const skippedAccounts = new Set<string>();
+
+  for (const line of yearLines) {
+    let account = byExternal.get(line.accountId);
+    if (!account) {
+      account = await prisma.ledgerAccount.create({
+        data: { entityId: input.entityId, externalId: line.accountId, name: line.accountName },
+      });
+      byExternal.set(line.accountId, account);
+    }
+    if (!account.mappedReportingAccountId) {
+      skipped += 1;
+      skippedAccounts.add(line.accountName);
+      continue;
+    }
+    const raId = account.mappedReportingAccountId;
+    const row = monthlyByReporting.get(raId) ?? {};
+    row[line.month] = (row[line.month] ?? 0) + line.amount;
+    monthlyByReporting.set(raId, row);
+    imported += 1;
+  }
+
+  const label = `${chosen.name} (QBO import)`;
+  let budget;
+  try {
+    budget = await createBudget({ entityId: input.entityId, fiscalYear: input.fiscalYear, label });
+  } catch {
+    // Label collision — disambiguate with a timestamp-free counter suffix.
+    budget = await createBudget({
+      entityId: input.entityId,
+      fiscalYear: input.fiscalYear,
+      label: `${label} #${(await prisma.budget.count({ where: { entityId: input.entityId, fiscalYear: input.fiscalYear } })) + 1}`,
+    });
+  }
+
+  await saveBudgetLinesBulk(
+    budget.id,
+    Array.from(monthlyByReporting.entries()).map(([reportingAccountId, monthly]) => ({ reportingAccountId, monthly })),
+  );
+
+  return {
+    ok: true as const,
+    budgetId: budget.id,
+    imported,
+    skipped,
+    skippedAccounts: Array.from(skippedAccounts),
+    qboBudgetName: chosen.name,
+  };
+}

@@ -2,6 +2,8 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { NewBudgetButton } from "@/components/pace/new-budget";
+import { ImportQboBudgetButton } from "@/components/pace/import-qbo-budget";
+import { qboConfigured } from "@/lib/pace/qbo";
 
 export const dynamic = "force-dynamic";
 
@@ -9,12 +11,20 @@ const KIND_LABELS: Record<string, string> = { ORIGINAL: "Original", REFORECAST: 
 
 export default async function BudgetsPage() {
   const [entities, budgets] = await Promise.all([
-    prisma.entity.findMany({ where: { active: true }, orderBy: { createdAt: "asc" }, select: { id: true, name: true } }),
+    prisma.entity.findMany({
+      where: { active: true },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, name: true, connection: { select: { provider: true, status: true } } },
+    }),
     prisma.budget.findMany({
       orderBy: [{ fiscalYear: "desc" }, { createdAt: "asc" }],
       include: { entity: { select: { name: true } }, _count: { select: { lines: true } } },
     }),
   ]);
+  const qboEntities =
+    qboConfigured()
+      ? entities.filter((e) => e.connection?.provider === "QBO" && e.connection?.status === "connected").map((e) => ({ id: e.id, name: e.name }))
+      : [];
 
   return (
     <div>
@@ -23,7 +33,11 @@ export default async function BudgetsPage() {
         title="Budgets"
         description="Plan by reporting-COA line, per entity and fiscal year. Versions are lockable; reforecasts and scenarios are new versions — nothing is overwritten."
       >
-        <NewBudgetButton entities={entities} budgets={budgets.map((b) => ({ id: b.id, label: `${b.entity.name} · ${b.label}` }))} />
+        <ImportQboBudgetButton entities={qboEntities} />
+        <NewBudgetButton
+          entities={entities.map((e) => ({ id: e.id, name: e.name }))}
+          budgets={budgets.map((b) => ({ id: b.id, label: `${b.entity.name} · ${b.label}` }))}
+        />
       </PageHeader>
 
       {budgets.length === 0 ? (

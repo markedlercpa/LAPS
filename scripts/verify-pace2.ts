@@ -64,6 +64,27 @@ async function main() {
 
   console.log(`\nnarrativesConfigured=${narrativesConfigured()} (AI draft ${narrativesConfigured() ? "available" : "off"})`);
 
+  // QBO budget parser (pure — no network): a sample query response → lines.
+  const { parseQboBudgets } = await import("@/lib/pace/qbo");
+  const parsed = parseQboBudgets({
+    QueryResponse: {
+      Budget: [
+        {
+          Name: "FY2026 Plan",
+          BudgetDetail: [
+            { BudgetDate: "2026-01-01", Amount: 15000, AccountRef: { value: "82", name: "Consulting Income" } },
+            { BudgetDate: "2026-02-01", Amount: 16000, AccountRef: { value: "82", name: "Consulting Income" } },
+            { BudgetDate: "2026-01-01", Amount: 7000, AccountRef: { value: "60", name: "Payroll" } },
+          ],
+        },
+      ],
+    },
+  });
+  console.log(`parseQboBudgets → ${parsed.length} budget(s), "${parsed[0]?.name}", ${parsed[0]?.lines.length} lines, first month ${parsed[0]?.lines[0]?.month}`);
+  if (parsed.length !== 1 || parsed[0].lines.length !== 3 || parsed[0].lines[0].month !== "2026-01") {
+    throw new Error("QBO budget parser output wrong");
+  }
+
   await prisma.entity.delete({ where: { id: entity.id } }).catch(() => {});
   console.log("cleaned up throwaway entity");
   console.log("\n✅ PACE Phase 2 smoke passed");

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
-import { createBudget, saveBudgetLinesBulk, setBudgetStatus } from "@/lib/pace/budgets";
+import { createBudget, saveBudgetLinesBulk, setBudgetStatus, importQboBudget } from "@/lib/pace/budgets";
 import { upsertNote, draftNarrative } from "@/lib/pace/narratives";
 
 async function requireUser() {
@@ -39,6 +39,21 @@ export async function saveBudgetGridAction(
   if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
   const res = await saveBudgetLinesBulk(budgetId, lines);
   revalidatePath(`/pace/budgets/${budgetId}`);
+  return res;
+}
+
+const importQboSchema = z.object({
+  entityId: z.string().min(1),
+  fiscalYear: z.coerce.number().int().min(2000).max(2100),
+  budgetName: z.string().optional(),
+});
+
+export async function importQboBudgetAction(input: unknown) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const parsed = importQboSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  const res = await importQboBudget(parsed.data);
+  if (res.ok) revalidatePath("/pace/budgets");
   return res;
 }
 
