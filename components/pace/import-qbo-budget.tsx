@@ -22,6 +22,14 @@ export function ImportQboBudgetButton({ entities }: { entities: { id: string; na
   const [options, setOptions] = useState<QboBudgetOption[] | null>(null);
   const [budgetName, setBudgetName] = useState("");
   const [year, setYear] = useState<number>(new Date().getUTCFullYear());
+  const [result, setResult] = useState<{
+    budgetId: string;
+    imported: number;
+    skipped: number;
+    skippedAccounts: string[];
+    rawLineCount: number;
+    totalPulled: number;
+  } | null>(null);
 
   if (entities.length === 0) return null;
 
@@ -31,6 +39,7 @@ export function ImportQboBudgetButton({ entities }: { entities: { id: string; na
     setOptions(null);
     setBudgetName("");
     setMsg(null);
+    setResult(null);
   }
 
   function fetchBudgets() {
@@ -56,15 +65,34 @@ export function ImportQboBudgetButton({ entities }: { entities: { id: string; na
 
   function doImport() {
     setMsg(null);
+    setResult(null);
     startTransition(async () => {
       const res = await importQboBudgetAction({ entityId, fiscalYear: year, budgetName });
-      if (res.ok) {
-        router.push(`/pace/budgets/${res.budgetId}`);
-      } else {
+      if (!res.ok) {
         setMsg(res.error);
+        return;
       }
+      const summary = {
+        budgetId: res.budgetId,
+        imported: res.imported,
+        skipped: res.skipped,
+        skippedAccounts: res.skippedAccounts,
+        rawLineCount: res.rawLineCount,
+        totalPulled: res.totalPulled,
+      };
+      // If every line landed (nothing skipped), go straight to the budget.
+      if (res.imported > 0 && res.skipped === 0) {
+        router.push(`/pace/budgets/${res.budgetId}`);
+        return;
+      }
+      // Otherwise keep the modal open with a diagnostic summary so the user can
+      // see whether amounts came through (mapping issue) or not (pull issue).
+      setResult(summary);
     });
   }
+
+  const dollars = (n: number) =>
+    n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
   return (
     <>
@@ -120,9 +148,48 @@ export function ImportQboBudgetButton({ entities }: { entities: { id: string; na
 
           {msg && <p className="text-[13px] text-accent-700">{msg}</p>}
 
+          {result && (
+            <div className="border-2 border-divider bg-surface p-3 text-[13px]">
+              <div className="micro-label mb-1">Import summary</div>
+              <p>
+                Pulled <strong>{result.rawLineCount}</strong> budget line{result.rawLineCount === 1 ? "" : "s"} from
+                QuickBooks totaling <strong>{dollars(result.totalPulled)}</strong> for FY{year}.
+              </p>
+              <p className="mt-1">
+                Applied <strong>{result.imported}</strong> to mapped reporting accounts;{" "}
+                <strong>{result.skipped}</strong> skipped as unmapped.
+              </p>
+              {result.imported === 0 && result.totalPulled > 0 && (
+                <p className="mt-2 text-accent-700">
+                  Amounts came through, but none of the QBO accounts are mapped to your reporting COA yet — so the
+                  budget saved empty. Map these accounts in <strong>COA Mapping</strong>, then re-import.
+                </p>
+              )}
+              {result.totalPulled === 0 && (
+                <p className="mt-2 text-accent-700">
+                  QuickBooks returned the budget structure but no dollar amounts for FY{year}. Check that the budget
+                  actually has figures entered for this fiscal year in QBO.
+                </p>
+              )}
+              {result.skippedAccounts.length > 0 && (
+                <p className="mt-2 text-muted">
+                  Unmapped: {result.skippedAccounts.slice(0, 8).join(", ")}
+                  {result.skippedAccounts.length > 8 ? `, +${result.skippedAccounts.length - 8} more` : ""}
+                </p>
+              )}
+              <button
+                type="button"
+                className="btn btn-secondary btn-block mt-3"
+                onClick={() => router.push(`/pace/budgets/${result.budgetId}`)}
+              >
+                Open the imported budget
+              </button>
+            </div>
+          )}
+
           <div className="flex justify-end gap-2">
             <button type="button" className="btn btn-secondary" onClick={() => setOpen(false)} disabled={pending}>Close</button>
-            {options && options.length > 0 && (
+            {options && options.length > 0 && !result && (
               <button type="button" className="btn btn-primary" onClick={doImport} disabled={pending || !budgetName}>
                 {pending ? "Importing…" : "Import"}
               </button>

@@ -300,21 +300,58 @@ export async function pullBudget(entityId: string): Promise<QboBudget[] | null> 
       console.error("QBO Budget query failed:", res.status, await res.text());
       return null;
     }
-    return parseQboBudgets(await res.json());
+    const payload = (await res.json()) as QboQueryResponse;
+    const entities = payload?.QueryResponse?.Budget ?? [];
+
+    // Some QBO companies return budget headers/detail from the query WITHOUT the
+    // Amount populated. When a budget's detail is missing or all-zero, re-fetch
+    // it by Id (the read endpoint returns full detail with amounts).
+    const resolved: QboBudgetEntity[] = [];
+    for (const b of entities) {
+      const hasAmounts = (b.BudgetDetail ?? []).some((d) => Number(String(d.Amount ?? "").replace(/,/g, "")) !== 0);
+      if (hasAmounts || !b.Id) {
+        resolved.push(b);
+        continue;
+      }
+      const full = await readBudgetById(auth, b.Id);
+      resolved.push(full ?? b);
+    }
+
+    const parsed = resolved.map(parseBudgetEntity);
+    const totalLines = parsed.reduce((s, p) => s + p.lines.length, 0);
+    const totalAmt = parsed.reduce((s, p) => s + p.lines.reduce((a, l) => a + Math.abs(l.amount), 0), 0);
+    console.error(`QBO pullBudget: ${parsed.length} budget(s), ${totalLines} detail lines, $${totalAmt.toFixed(0)} total`);
+    return parsed;
   } catch (err) {
     console.error("QBO pullBudget error:", err);
     return null;
   }
 }
 
+/** Read a single budget by Id — returns its full detail (with amounts). */
+async function readBudgetById(auth: { token: string; realmId: string }, id: string): Promise<QboBudgetEntity | null> {
+  const url = `${apiBase()}/v3/company/${auth.realmId}/budget/${id}?minorversion=70`;
+  try {
+    const res = await fetchWithRetry(url, { headers: { Authorization: `Bearer ${auth.token}`, Accept: "application/json" } });
+    if (!res.ok) {
+      console.error("QBO budget read-by-id failed:", res.status);
+      return null;
+    }
+    const doc = (await res.json()) as { Budget?: QboBudgetEntity };
+    return doc.Budget ?? null;
+  } catch (err) {
+    console.error("QBO readBudgetById error:", err);
+    return null;
+  }
+}
+
 type QboBudgetDetail = { BudgetDate?: string; Amount?: number | string; AccountRef?: { value?: string; name?: string } };
-type QboBudgetEntity = { Name?: string; BudgetDetail?: QboBudgetDetail[] };
+type QboBudgetEntity = { Id?: string; Name?: string; BudgetDetail?: QboBudgetDetail[] };
 type QboQueryResponse = { QueryResponse?: { Budget?: QboBudgetEntity[] } };
 
-/** Pure parser for the QBO Budget query response. */
-export function parseQboBudgets(payload: unknown): QboBudget[] {
-  const budgets = (payload as QboQueryResponse)?.QueryResponse?.Budget ?? [];
-  return budgets.map((b, i) => ({
+/** Parse one QBO budget entity into normalized lines (robust amount coercion). */
+export function parseBudgetEntity(b: QboBudgetEntity, i = 0): QboBudget {
+  return {
     name: b.Name || `QBO Budget ${i + 1}`,
     lines: (b.BudgetDetail ?? [])
       .map((d) => {
@@ -325,11 +362,17 @@ export function parseQboBudgets(payload: unknown): QboBudget[] {
           accountId,
           accountName: d.AccountRef?.name || accountId,
           month: date.slice(0, 7), // "YYYY-MM"
-          amount: Number(d.Amount) || 0,
+          amount: Number(String(d.Amount ?? "0").replace(/,/g, "")) || 0,
         };
       })
       .filter((x): x is QboBudget["lines"][number] => x !== null),
-  }));
+  };
+}
+
+/** Pure parser for the QBO Budget query response (array form). */
+export function parseQboBudgets(payload: unknown): QboBudget[] {
+  const budgets = (payload as QboQueryResponse)?.QueryResponse?.Budget ?? [];
+  return budgets.map((b, i) => parseBudgetEntity(b, i));
 }
 
 // ── QBO report parsing ──────────────────────────────────────────────────────

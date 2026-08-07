@@ -136,6 +136,12 @@ export async function importQboBudget(input: { entityId: string; fiscalYear: num
   let skipped = 0;
   const skippedAccounts = new Set<string>();
 
+  // Diagnostics: how many detail lines came back for this FY and the gross
+  // dollars they carry. This lets the UI tell a parse/pull miss (totalPulled=0)
+  // apart from an all-unmapped miss (totalPulled>0 but imported=0).
+  const rawLineCount = yearLines.length;
+  const totalPulled = yearLines.reduce((s, l) => s + Math.abs(l.amount), 0);
+
   for (const line of yearLines) {
     let account = byExternal.get(line.accountId);
     if (!account) {
@@ -181,5 +187,7 @@ export async function importQboBudget(input: { entityId: string; fiscalYear: num
     skipped,
     skippedAccounts: Array.from(skippedAccounts),
     qboBudgetName: chosen.name,
+    rawLineCount,
+    totalPulled,
   };
 }
