@@ -1009,3 +1009,162 @@ model StageTransition {
 
   @@index([engagementId])
 }
+
+// ===========================================================================
+// PACE — finance module (analytics layer on top of the QBO ledger)
+// Phase 1: Actuals. Native financial store (entities, normalized TB, reporting
+// COA + mapping, statements), fed by QBO (flag-gated) or manual/CSV import.
+// Cross-module/user links are scalar ids. QBO stays the accounting system of
+// record; PACE never writes to the ledger.
+// ===========================================================================
+
+enum LedgerProvider {
+  QBO
+  ZOHO
+  MANUAL
+}
+
+enum StatementKind {
+  IS
+  BS
+}
+
+enum NaturalSide {
+  DEBIT
+  CREDIT
+}
+
+enum PeriodStatus {
+  OPEN
+  CLOSED
+}
+
+enum SyncStatus {
+  OK
+  PARTIAL
+  FAILED
+}
+
+/// A company PACE tracks. Multi-entity from day one; consolidated views sum
+/// across entities.
+model Entity {
+  id        String   @id @default(cuid())
+  name      String
+  legalName String?
+  kind      String   @default("operating") // operating | holdco | opm | other
+  currency  String   @default("USD")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  connection     LedgerConnection?
+  ledgerAccounts LedgerAccount[]
+  periods        TrialBalancePeriod[]
+  syncRuns       SyncRun[]
+
+  @@index([active])
+}
+
+/// The ledger link for an entity. Holds QBO OAuth tokens (mirrors Auth.js
+/// Account); MANUAL provider needs none.
+model LedgerConnection {
+  id             String         @id @default(cuid())
+  entityId       String         @unique
+  provider       LedgerProvider @default(MANUAL)
+  status         String         @default("disconnected")
+  realmId        String? // QBO company id
+  accessToken    String?        @db.Text
+  refreshToken   String?        @db.Text
+  expiresAt      DateTime?
+  lastSyncAt     DateTime?
+  lastSyncStatus String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+}
+
+/// Firm-standard reporting chart of accounts every entity COA maps to, so
+/// consolidated statements and cross-entity KPIs compare like with like.
+model ReportingAccount {
+  id          String        @id @default(cuid())
+  code        String?       @unique
+  name        String
+  statement   StatementKind
+  type        String // e.g. Revenue, COGS, OpEx, Asset, Liability, Equity
+  category    String?
+  subcategory String?
+  naturalSide NaturalSide
+  sortOrder   Int           @default(0)
+
+  ledgerAccounts LedgerAccount[]
+}
+
+/// A source account from an entity's ledger. Unmapped (null reporting account)
+/// = the exception queue — never silently dropped.
+model LedgerAccount {
+  id                       String   @id @default(cuid())
+  entityId                 String
+  externalId               String? // QBO account id
+  name                     String
+  sourceType               String?
+  mappedReportingAccountId String?
+  active                   Boolean  @default(true)
+  createdAt                DateTime @default(now())
+
+  entity           Entity             @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  reportingAccount ReportingAccount?  @relation(fields: [mappedReportingAccountId], references: [id], onDelete: SetNull)
+  lines            TrialBalanceLine[]
+
+  @@unique([entityId, externalId])
+  @@index([entityId])
+  @@index([mappedReportingAccountId])
+}
+
+/// One entity's trial balance for one month.
+model TrialBalancePeriod {
+  id          String       @id @default(cuid())
+  entityId    String
+  periodMonth DateTime     @db.Date // first of month
+  status      PeriodStatus @default(OPEN)
+  source      String       @default("manual") // qbo | manual
+  balanced    Boolean      @default(false)
+  sourcedAt   DateTime     @default(now())
+  notes       String?
+
+  entity Entity             @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  lines  TrialBalanceLine[]
+
+  @@unique([entityId, periodMonth])
+  @@index([entityId])
+}
+
+/// A single account's balance within a trial-balance period (signed, natural-
+/// side normalized: debits positive, credits negative on the raw amount).
+model TrialBalanceLine {
+  id              String  @id @default(cuid())
+  periodId        String
+  ledgerAccountId String
+  amount          Decimal @db.Decimal(14, 2)
+
+  period        TrialBalancePeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  ledgerAccount LedgerAccount      @relation(fields: [ledgerAccountId], references: [id], onDelete: Cascade)
+
+  @@index([periodId])
+  @@index([ledgerAccountId])
+}
+
+/// Audit trail for every sync/import + its data-quality results.
+model SyncRun {
+  id         String     @id @default(cuid())
+  entityId   String
+  startedAt  DateTime   @default(now())
+  finishedAt DateTime?
+  status     SyncStatus @default(OK)
+  message    String?
+  stats      Json? // { accounts, periods, unmapped, balanced }
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@index([entityId])
+}

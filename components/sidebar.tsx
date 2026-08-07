@@ -20,6 +20,8 @@ import {
   Inbox,
   Boxes,
   ClipboardList,
+  Gauge,
+  Landmark,
   LogOut,
   type LucideIcon,
 } from "lucide-react";
@@ -82,12 +84,25 @@ const MODULES: Module[] = [
     icon: Boxes,
     items: [{ href: "/staple/engagements", label: "Engagements", icon: ClipboardList }],
   },
+  {
+    key: "pace",
+    name: "PACE",
+    caption: "Finance",
+    href: "/pace/actuals",
+    icon: Gauge,
+    items: [
+      { href: "/pace/actuals", label: "Actuals", icon: Landmark },
+      { href: "/pace/entities", label: "Entities", icon: Boxes },
+      { href: "/pace/mapping", label: "COA Mapping", icon: ClipboardList },
+    ],
+  },
 ];
 
 function activeModuleKey(pathname: string): string | null {
   if (pathname.startsWith("/inbox")) return "triage";
   if (pathname.startsWith("/echo")) return "echo";
   if (pathname.startsWith("/staple")) return "staple";
+  if (pathname.startsWith("/pace")) return "pace";
   if (pathname.startsWith("/home")) return null;
   return "laps"; // pipeline/leads/appointments/proposals/sales/reporting/settings
 }

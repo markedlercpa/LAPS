@@ -78,6 +78,17 @@ services:
         sync: false
       - key: STAPLE_S3_ENDPOINT
         sync: false
+      # PACE QuickBooks Online (Actuals). Set in the Render dashboard. When
+      # unset, PACE runs on manual/CSV trial-balance import; the nightly sync is
+      # a no-op.
+      - key: QBO_CLIENT_ID
+        sync: false
+      - key: QBO_CLIENT_SECRET
+        sync: false
+      - key: QBO_ENVIRONMENT
+        sync: false
+      - key: QBO_REDIRECT_URI
+        sync: false
       # Shared secret guarding the reminder cron endpoint. The cron job below
       # sends it as a bearer token.
       - key: CRON_SECRET
@@ -98,5 +109,22 @@ services:
     envVars:
       - key: REMINDER_URL
         value: https://laps-wxm8.onrender.com/api/cron/booking-reminders
+      - key: CRON_SECRET
+        sync: false
+
+  # Nightly PACE actuals sync — pulls current + prior month TB from QBO for every
+  # connected entity. No-op until QBO is configured + an entity is connected.
+  - type: cron
+    name: laps-pace-sync
+    runtime: node
+    plan: free
+    branch: claude/laps-sales-cycle-saas-2twnnv
+    schedule: "0 5 * * *"
+    buildCommand: "true"
+    startCommand: >
+      node -e "fetch(process.env.PACE_SYNC_URL,{method:'POST',headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(r=>r.text()).then(t=>{console.log(t)}).catch(e=>{console.error(e);process.exit(1)})"
+    envVars:
+      - key: PACE_SYNC_URL
+        value: https://laps-wxm8.onrender.com/api/cron/pace-sync
       - key: CRON_SECRET
         sync: false

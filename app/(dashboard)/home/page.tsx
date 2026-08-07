@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Inbox, Radio, Activity, Boxes, ArrowRight } from "lucide-react";
+import { Inbox, Radio, Activity, Boxes, Gauge, ArrowRight } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +32,13 @@ const MODULES = [
     href: "/staple/engagements",
     icon: Boxes,
     body: "Client delivery, stage by stage — Staging, Takeoff, Assemble, Package, Leverage, Evangelize. Won deals land here automatically.",
+  },
+  {
+    name: "PACE",
+    caption: "Finance",
+    href: "/pace/actuals",
+    icon: Gauge,
+    body: "Actuals from QuickBooks, budgets, rolling cash forecasts, and the live KPI pulse — the financial command layer across all entities.",
   },
 ];
 
