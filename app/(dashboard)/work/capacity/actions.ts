@@ -12,6 +12,8 @@ import {
   ensureRoleBandsSeeded,
 } from "@/lib/work/capacity";
 import { logTime, deleteTimeEntry } from "@/lib/work/time";
+import { requestBooking, confirmBooking, declineBooking, releaseBooking, editBookingHours } from "@/lib/work/bookings";
+import { closeWeek } from "@/lib/work/weekclose";
 import { ENGAGEMENT_TYPES } from "@/lib/work-taxonomy";
 
 async function requireUser() {
@@ -167,5 +169,69 @@ export async function deleteTimeEntryAction(id: string) {
   if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
   const res = await deleteTimeEntry(id);
   revalidatePath("/work/capacity/time");
+  return res;
+}
+
+// ── Booking lifecycle (hoteling board) ──────────────────────────────────────
+
+const bookingSchema = z.object({
+  engagementId: z.string().min(1, "Pick an engagement"),
+  resourceId: z.string().min(1, "Pick a resource"),
+  isoWeek: z.string().regex(/^\d{4}-W\d{2}$/, "Bad ISO week"),
+  hoursBooked: z.coerce.number().gt(0, "Hours must be greater than zero").max(80),
+  overBudgetAck: z.coerce.boolean().default(false),
+});
+
+function revalidateBoard() {
+  revalidatePath("/work/capacity/grid");
+  revalidatePath("/work/capacity/queue");
+}
+
+export async function requestBookingAction(input: unknown) {
+  const userId = await requireUser();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+  const parsed = bookingSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  const res = await requestBooking({ ...parsed.data, requestedBy: userId });
+  if (res.ok) revalidateBoard();
+  return res;
+}
+
+export async function confirmBookingAction(id: string) {
+  const userId = await requireUser();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+  const res = await confirmBooking(id, userId);
+  if (res.ok) revalidateBoard();
+  return res;
+}
+
+export async function declineBookingAction(id: string) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const res = await declineBooking(id);
+  if (res.ok) revalidateBoard();
+  return res;
+}
+
+export async function releaseBookingAction(id: string) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const res = await releaseBooking(id);
+  if (res.ok) revalidateBoard();
+  return res;
+}
+
+export async function editBookingHoursAction(id: string, hours: number) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const res = await editBookingHours(id, hours);
+  if (res.ok) revalidateBoard();
+  return res;
+}
+
+export async function closeWeekAction(isoWeek: string) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const res = await closeWeek(isoWeek);
+  if (res.ok) {
+    revalidateBoard();
+    revalidatePath("/work/capacity/engagements");
+  }
   return res;
 }

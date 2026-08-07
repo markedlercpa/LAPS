@@ -17,6 +17,8 @@ import {
 } from "@/lib/work/capacity";
 import { isoWeekOf, isoWeekStart } from "@/lib/work-taxonomy";
 import { logTime, deleteTimeEntry } from "@/lib/work/time";
+import { requestBooking, confirmBooking, releaseBooking, isPastCutoff, weekIsClosed } from "@/lib/work/bookings";
+import { computeWeekCharges, closeWeek } from "@/lib/work/weekclose";
 
 async function main() {
   // ISO week helpers (pure).
@@ -97,6 +99,49 @@ async function main() {
   const de = directorEconomics({ declaredPortfolioRevenueCents: 240_000_000, directorCostCentsAnnual: 12_000_000, parBonusPct: 0.05 });
   console.log(`director econ: base%=${de.basePct} parBonus=$${(de.parBonusCents / 100).toLocaleString()} onTarget%=${de.onTargetPct}`);
   if (de.parBonusCents !== 12_000_000 || de.basePct !== 0.05 || de.onTargetPct !== 0.1) throw new Error("director economics wrong");
+
+  // ── Booking lifecycle (hoteling board) ──
+  // Auto-confirm: 6h (≤8) on a resource with ample free capacity → CONFIRMED.
+  const bAuto = await requestBooking({ engagementId: eng.id, resourceId: res.id, isoWeek: "2026-W50", hoursBooked: 6 });
+  if (!bAuto.ok || bAuto.status !== "CONFIRMED") throw new Error("small request should auto-confirm");
+  // Larger request → queued REQUESTED, then broker confirm.
+  const bBig = await requestBooking({ engagementId: eng.id, resourceId: res.id, isoWeek: "2026-W51", hoursBooked: 30 });
+  if (!bBig.ok || bBig.status !== "REQUESTED") throw new Error("30h should queue as requested");
+  const conf = await confirmBooking(bBig.id, "tester");
+  if (!conf.ok) throw new Error("confirm 30h should succeed within 40h capacity");
+  // Conflict: another 30h same resource+week overbooks (30+30 > 40) → confirm rejected.
+  const eng2 = await createEngagement({ portfolioId: pf.id, clientName: "ZZZ Client 2" });
+  await replaceEngagementBudget(eng2.id, [{ roleBandId: assoc.id, budgetedHours: 100 }]);
+  const bConf = await requestBooking({ engagementId: eng2.id, resourceId: res.id, isoWeek: "2026-W51", hoursBooked: 30 });
+  const confBad = await confirmBooking((bConf as { id: string }).id, "tester");
+  console.log(`overbook confirm → ok=${confBad.ok} (expect false)`);
+  if (confBad.ok) throw new Error("overbooking confirm should be rejected");
+  // Release before cutoff (future week) → RELEASED, uncharged.
+  const rel = await releaseBooking(bAuto.id);
+  if (!rel.ok || rel.charged) throw new Error("future-week release should be uncharged");
+  // Release after cutoff (past week) → stays confirmed, still charges.
+  const bPast = await requestBooking({ engagementId: eng.id, resourceId: res.id, isoWeek: "2026-W01", hoursBooked: 4 });
+  if (!bPast.ok) throw new Error("past-week request failed");
+  console.log(`isPastCutoff(2026-W01)=${isPastCutoff("2026-W01")} (expect true)`);
+  const relPast = await releaseBooking(bPast.id);
+  console.log(`release past cutoff → charged=${relPast.ok && relPast.charged} (expect true)`);
+  if (!relPast.ok || !relPast.charged) throw new Error("past-cutoff release should still charge");
+
+  // Week close: 2026-W33 has 10h consumed @ $90 + 5h director @ $0 = $900 consumed labor.
+  const preview = await computeWeekCharges("2026-W33");
+  console.log(`W33 charges preview: $${(preview.totalCents / 100).toFixed(2)} (expect 900)`);
+  if (preview.totalCents !== 90000) throw new Error(`W33 charge should be $900, got ${preview.totalCents}`);
+  const close = await closeWeek("2026-W33", "tester");
+  if (!close.ok || close.totalCents !== 90000) throw new Error("closeWeek total wrong");
+  if (!(await weekIsClosed("2026-W33"))) throw new Error("week should be closed");
+
+  // Booked-unused: confirm 10h on an empty future week → charges 10h × $90 with 0 consumed.
+  const bUnused = await requestBooking({ engagementId: eng.id, resourceId: res.id, isoWeek: "2026-W44", hoursBooked: 10 });
+  await confirmBooking((bUnused as { id: string }).id, "tester");
+  const w44 = await computeWeekCharges("2026-W44");
+  const pfCharge = w44.charges.find((c) => c.portfolioId === pf.id);
+  console.log(`W44 booked-unused: $${((pfCharge?.bookedUnusedCents ?? 0) / 100).toFixed(2)} (expect 900)`);
+  if ((pfCharge?.bookedUnusedCents ?? 0) !== 90000) throw new Error("booked-unused charge wrong");
 
   // Cleanup.
   await prisma.poolResource.delete({ where: { id: dir.id } }).catch(() => {});

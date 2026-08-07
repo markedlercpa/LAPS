@@ -1469,3 +1469,14 @@ model TimeEntry {
   @@index([resourceId, workDate])
   @@index([engagementId])
 }
+
+/// Weekly settlement record. Closing a week snapshots each portfolio's charges
+/// (consumed labor + booked-unused) and freezes that week's bookings.
+model WeekClose {
+  id        String   @id @default(cuid())
+  isoWeek   String   @unique
+  closedAt  DateTime @default(now())
+  closedBy  String?
+  charges   Json // [{ portfolioId, portfolioName, consumedLaborCents, bookedUnusedCents, totalCents }]
+  createdAt DateTime @default(now())
+}

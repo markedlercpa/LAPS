@@ -23,6 +23,7 @@ import {
   Gauge,
   Landmark,
   Clock,
+  CalendarRange,
   Table2,
   Scale,
   FileBarChart,
@@ -88,6 +89,8 @@ const MODULES: Module[] = [
     icon: Boxes,
     items: [
       { href: "/work/engagements", label: "Delivery", icon: ClipboardList },
+      { href: "/work/capacity/grid", label: "Capacity grid", icon: CalendarRange },
+      { href: "/work/capacity/queue", label: "Booking queue", icon: Inbox },
       { href: "/work/capacity/engagements", label: "Engagements", icon: Table2 },
       { href: "/work/capacity/time", label: "Time", icon: Clock },
       { href: "/work/capacity/portfolios", label: "Portfolios", icon: Landmark },
