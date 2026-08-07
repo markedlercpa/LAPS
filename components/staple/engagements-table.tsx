@@ -57,7 +57,7 @@ export function EngagementsTable({ rows }: { rows: EngagementRow[] }) {
       columns={columns}
       data={rows}
       searchKeys={["client", "serviceLine"]}
-      rowHref={(r) => `/staple/engagements/${r.id}`}
+      rowHref={(r) => `/work/engagements/${r.id}`}
       emptyMessage="No engagements yet. Won deals land here automatically, or create one manually."
       searchPlaceholder="Search engagements"
     />

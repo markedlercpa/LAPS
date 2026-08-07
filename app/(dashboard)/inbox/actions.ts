@@ -67,7 +67,7 @@ export async function tagEmail(id: string, categories: string[]) {
   return res.ok ? { ok: true as const, categories } : { ok: false as const, error: res.error };
 }
 
-// ── Create LAPS objects from an email ─────────────────────────────────────
+// ── Create Sales objects from an email ─────────────────────────────────────
 
 const fromSchema = z.object({
   name: z.string().optional(),

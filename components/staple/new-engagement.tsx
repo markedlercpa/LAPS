@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
-import { createEngagement } from "@/app/(dashboard)/staple/actions";
+import { createEngagement } from "@/app/(dashboard)/work/actions";
 import { SERVICE_LINES, SERVICE_LINE_LABELS } from "@/lib/staple-taxonomy";
 
 export function NewEngagementButton() {
@@ -27,7 +27,7 @@ export function NewEngagementButton() {
       const res = await createEngagement(input);
       if (res.ok) {
         setOpen(false);
-        router.push(`/staple/engagements/${res.id}`);
+        router.push(`/work/engagements/${res.id}`);
       } else {
         setError(res.error);
       }

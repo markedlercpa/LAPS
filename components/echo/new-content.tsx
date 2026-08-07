@@ -6,7 +6,7 @@ import { Plus } from "lucide-react";
 import type { ContentChannel } from "@prisma/client";
 import { Modal } from "@/components/ui/modal";
 import { CONTENT_CHANNELS, CONTENT_CHANNEL_LABELS } from "@/lib/echo-taxonomy";
-import { createContentItem } from "@/app/(dashboard)/echo/content/actions";
+import { createContentItem } from "@/app/(dashboard)/marketing/content/actions";
 
 export function NewContent() {
   const router = useRouter();
@@ -24,7 +24,7 @@ export function NewContent() {
       else {
         setOpen(false);
         setTitle("");
-        router.push(`/echo/content/${res.id}`);
+        router.push(`/marketing/content/${res.id}`);
       }
     });
   };

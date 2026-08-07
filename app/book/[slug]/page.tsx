@@ -61,7 +61,7 @@ export default async function BookLandingPage({
         </div>
       )}
 
-      <p className="mt-10 text-center text-[12px] text-neutral-500">Powered by LAPS</p>
+      <p className="mt-10 text-center text-[12px] text-neutral-500">Powered by Pulse</p>
     </div>
   );
 }

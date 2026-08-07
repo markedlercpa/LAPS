@@ -13,7 +13,7 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user?.id) redirect("/signin");
-  if (!qboConfigured()) redirect("/pace/entities?qbo=unconfigured");
+  if (!qboConfigured()) redirect("/finance/entities?qbo=unconfigured");
 
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
@@ -21,8 +21,8 @@ export async function GET(req: Request) {
   // Verify the signed, time-boxed state (CSRF protection) → entityId.
   const entityId = verifyState(url.searchParams.get("state"));
 
-  if (!code || !entityId || !realmId) redirect("/pace/entities?qbo=error");
+  if (!code || !entityId || !realmId) redirect("/finance/entities?qbo=error");
 
   const ok = await exchangeCode(entityId, code, realmId);
-  redirect(`/pace/entities?qbo=${ok ? "connected" : "error"}`);
+  redirect(`/finance/entities?qbo=${ok ? "connected" : "error"}`);
 }

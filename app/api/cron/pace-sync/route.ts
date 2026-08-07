@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
- * Nightly PACE sync — pull the current + prior month trial balance from QBO for
+ * Nightly Finance sync — pull the current + prior month trial balance from QBO for
  * every connected entity. CRON_SECRET-guarded (same convention as
  * booking-reminders). No-op (ok:true, synced:0) when QBO is unconfigured or no
  * entity is connected, so the job is safe to schedule before QBO is wired.

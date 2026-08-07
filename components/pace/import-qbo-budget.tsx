@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Download, RefreshCw } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
-import { importQboBudgetAction, listQboBudgetsAction } from "@/app/(dashboard)/pace/budget-actions";
+import { importQboBudgetAction, listQboBudgetsAction } from "@/app/(dashboard)/finance/budget-actions";
 
 type QboBudgetOption = { name: string; years: number[] };
 
@@ -82,7 +82,7 @@ export function ImportQboBudgetButton({ entities }: { entities: { id: string; na
       };
       // If every line landed (nothing skipped), go straight to the budget.
       if (res.imported > 0 && res.skipped === 0) {
-        router.push(`/pace/budgets/${res.budgetId}`);
+        router.push(`/finance/budgets/${res.budgetId}`);
         return;
       }
       // Otherwise keep the modal open with a diagnostic summary so the user can
@@ -180,7 +180,7 @@ export function ImportQboBudgetButton({ entities }: { entities: { id: string; na
               <button
                 type="button"
                 className="btn btn-secondary btn-block mt-3"
-                onClick={() => router.push(`/pace/budgets/${result.budgetId}`)}
+                onClick={() => router.push(`/finance/budgets/${result.budgetId}`)}
               >
                 Open the imported budget
               </button>

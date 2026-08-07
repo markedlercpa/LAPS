@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { runAgentTurn, agentConfigured, type Decision } from "@/lib/agent/run";
 
 /**
- * Session-authenticated chat endpoint for the embedded LAPS assistant. Unlike
+ * Session-authenticated chat endpoint for the embedded Pulse assistant. Unlike
  * the rest of /api/agent/* (bearer-token, headless), this route acts on behalf
  * of the signed-in rep, so it authenticates with the user session and passes
  * their identity as the agent's context (ownership / send-as). The client holds

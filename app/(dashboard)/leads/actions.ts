@@ -168,7 +168,7 @@ export async function syncLeadInbound(leadId: string) {
   return { ok: true, created };
 }
 
-// ── ECHO → LAPS: trust signals ────────────────────────────────────────────
+// ── Marketing → Sales: trust signals ────────────────────────────────────────────
 
 const trustSignalSchema = z.object({
   leadId: z.string().min(1),
@@ -187,7 +187,7 @@ const trustSignalSchema = z.object({
   note: z.string().optional(),
 });
 
-/** Record a trust signal on a lead (human-visible surface over ECHO handoff). */
+/** Record a trust signal on a lead (human-visible surface over Marketing handoff). */
 export async function addLeadTrustSignal(input: unknown) {
   const parsed = trustSignalSchema.safeParse(input);
   if (!parsed.success) {

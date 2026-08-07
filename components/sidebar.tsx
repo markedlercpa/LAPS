@@ -40,7 +40,7 @@ type Module = {
   items: NavItem[];
 };
 
-// Top-level modules, in display order: Triage, then ECHO, then LAPS.
+// Top-level modules, in display order: Triage, Marketing, Sales, Work, Finance.
 const MODULES: Module[] = [
   {
     key: "triage",
@@ -51,21 +51,21 @@ const MODULES: Module[] = [
     items: [], // single-page module
   },
   {
-    key: "echo",
-    name: "ECHO",
+    key: "marketing",
+    name: "Marketing",
     caption: "Content engine",
-    href: "/echo/evidence",
+    href: "/marketing/evidence",
     icon: Radio,
     items: [
-      { href: "/echo/evidence", label: "Evidence", icon: Vault },
-      { href: "/echo/calling-cards", label: "Calling Cards", icon: Megaphone },
-      { href: "/echo/content", label: "Housed Content", icon: PenLine },
-      { href: "/echo/optics", label: "Optics", icon: LineChart },
+      { href: "/marketing/evidence", label: "Evidence", icon: Vault },
+      { href: "/marketing/calling-cards", label: "Calling Cards", icon: Megaphone },
+      { href: "/marketing/content", label: "Housed Content", icon: PenLine },
+      { href: "/marketing/optics", label: "Optics", icon: LineChart },
     ],
   },
   {
-    key: "laps",
-    name: "LAPS",
+    key: "sales",
+    name: "Sales",
     caption: "Sales cycle",
     href: "/pipeline",
     icon: Activity,
@@ -80,38 +80,38 @@ const MODULES: Module[] = [
     ],
   },
   {
-    key: "staple",
-    name: "STAPLE",
+    key: "work",
+    name: "Work",
     caption: "Delivery",
-    href: "/staple/engagements",
+    href: "/work/engagements",
     icon: Boxes,
-    items: [{ href: "/staple/engagements", label: "Engagements", icon: ClipboardList }],
+    items: [{ href: "/work/engagements", label: "Engagements", icon: ClipboardList }],
   },
   {
-    key: "pace",
-    name: "PACE",
-    caption: "Finance",
-    href: "/pace/actuals",
+    key: "finance",
+    name: "Finance",
+    caption: "Reporting & cash",
+    href: "/finance/actuals",
     icon: Gauge,
     items: [
-      { href: "/pace/actuals", label: "Actuals", icon: Landmark },
-      { href: "/pace/ledger", label: "General Ledger", icon: FileText },
-      { href: "/pace/budgets", label: "Budgets", icon: Table2 },
-      { href: "/pace/variance", label: "Budget vs Actual", icon: Scale },
-      { href: "/pace/review", label: "Operating Review", icon: FileBarChart },
-      { href: "/pace/entities", label: "Entities", icon: Boxes },
-      { href: "/pace/mapping", label: "COA Mapping", icon: ClipboardList },
+      { href: "/finance/actuals", label: "Actuals", icon: Landmark },
+      { href: "/finance/ledger", label: "General Ledger", icon: FileText },
+      { href: "/finance/budgets", label: "Budgets", icon: Table2 },
+      { href: "/finance/variance", label: "Budget vs Actual", icon: Scale },
+      { href: "/finance/review", label: "Operating Review", icon: FileBarChart },
+      { href: "/finance/entities", label: "Entities", icon: Boxes },
+      { href: "/finance/mapping", label: "COA Mapping", icon: ClipboardList },
     ],
   },
 ];
 
 function activeModuleKey(pathname: string): string | null {
   if (pathname.startsWith("/inbox")) return "triage";
-  if (pathname.startsWith("/echo")) return "echo";
-  if (pathname.startsWith("/staple")) return "staple";
-  if (pathname.startsWith("/pace")) return "pace";
+  if (pathname.startsWith("/marketing")) return "marketing";
+  if (pathname.startsWith("/work")) return "work";
+  if (pathname.startsWith("/finance")) return "finance";
   if (pathname.startsWith("/home")) return null;
-  return "laps"; // pipeline/leads/appointments/proposals/sales/reporting/settings
+  return "sales"; // pipeline/leads/appointments/proposals/sales/reporting/settings
 }
 
 function itemActive(pathname: string, href: string) {
@@ -132,9 +132,9 @@ export function Sidebar({
       {/* Brand → Home */}
       <Link href="/home" className="block border-b-2 border-divider px-4 py-6 no-underline">
         <div className="font-heading text-[22px] font-extrabold leading-none tracking-[-0.03em] text-ink">
-          Edler Zain
+          Pulse
         </div>
-        <div className="micro-label mt-2">Operating System</div>
+        <div className="micro-label mt-2">Edler Zain</div>
       </Link>
 
       <nav className="flex-1 overflow-y-auto p-2">

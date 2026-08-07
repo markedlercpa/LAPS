@@ -17,7 +17,7 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user?.id) redirect("/signin");
-  if (!qboConfigured()) redirect("/pace/entities?qbo=unconfigured");
+  if (!qboConfigured()) redirect("/finance/entities?qbo=unconfigured");
 
   const entityId = new URL(req.url).searchParams.get("entity");
   if (entityId) {
@@ -25,5 +25,5 @@ export async function GET(req: Request) {
     const url = entity ? await authorizeUrl(entity.id) : null;
     if (url) redirect(url);
   }
-  redirect("/pace/entities?qbo=connect");
+  redirect("/finance/entities?qbo=connect");
 }

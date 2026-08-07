@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw } from "lucide-react";
-import { syncQboAccountsAction } from "@/app/(dashboard)/pace/actions";
+import { syncQboAccountsAction } from "@/app/(dashboard)/finance/actions";
 
 /** Pull the QBO chart of accounts (with numbers) into the mapping queue. */
 export function SyncQboAccountsButton() {

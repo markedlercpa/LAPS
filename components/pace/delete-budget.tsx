@@ -3,7 +3,7 @@
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
-import { deleteBudgetAction } from "@/app/(dashboard)/pace/budget-actions";
+import { deleteBudgetAction } from "@/app/(dashboard)/finance/budget-actions";
 
 /** Delete a budget version (with confirm). Locked budgets are rejected server-side. */
 export function DeleteBudgetButton({ budgetId, label }: { budgetId: string; label: string }) {

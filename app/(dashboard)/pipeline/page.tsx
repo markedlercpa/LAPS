@@ -16,7 +16,7 @@ export default async function PipelinePage() {
       <PageHeader
         eyebrow="00 — Overview"
         title="Pipeline"
-        description="The LAPS funnel end to end, with conversion between each stage."
+        description="The Sales funnel end to end, with conversion between each stage."
       />
 
       <MetricRow

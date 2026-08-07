@@ -3,7 +3,7 @@
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { StatementKind } from "@prisma/client";
-import { mapAccountAction } from "@/app/(dashboard)/pace/actions";
+import { mapAccountAction } from "@/app/(dashboard)/finance/actions";
 
 export type ReportingOption = { id: string; label: string; statement: StatementKind };
 export type LedgerAccountRow = {

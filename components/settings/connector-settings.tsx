@@ -86,10 +86,10 @@ export function ConnectorSettings({
           <li>Generate a token below — it produces a personal connector URL (the token is part of the URL).</li>
           <li>In claude.ai, open <strong>Settings → Connectors → Add custom connector</strong>.</li>
           <li>Paste your connector URL. Leave the OAuth Client ID / Secret <strong>blank</strong> — the URL carries the credential.</li>
-          <li>Save, then enable LAPS in a chat&apos;s tools. (Custom connectors need a paid Claude plan.)</li>
+          <li>Save, then enable Pulse in a chat&apos;s tools. (Custom connectors need a paid Claude plan.)</li>
         </ol>
         <p className="mb-0 text-[13px] text-muted">
-          Treat the connector URL like a password — anyone with it can act as you in LAPS. Revoke a token anytime below.
+          Treat the connector URL like a password — anyone with it can act as you in Pulse. Revoke a token anytime below.
         </p>
       </div>
 

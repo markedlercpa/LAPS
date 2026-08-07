@@ -7,7 +7,7 @@ import { Modal } from "@/components/ui/modal";
 import {
   listFirefliesForImport,
   importFirefliesTranscript,
-} from "@/app/(dashboard)/echo/actions";
+} from "@/app/(dashboard)/marketing/actions";
 
 type Row = {
   id: string;

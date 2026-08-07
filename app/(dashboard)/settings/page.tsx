@@ -40,8 +40,8 @@ export default async function SettingsPage() {
       <section className="mt-10 border-t-2 border-divider pt-8">
         <h2 className="mb-1 text-[22px]">Claude connector (MCP)</h2>
         <p className="mb-4 max-w-[60ch] text-muted">
-          Connect LAPS to Claude as a custom connector so you can read and act on your pipeline
-          from a Claude chat. Each token acts as one LAPS user; Claude asks you to approve every
+          Connect Pulse to Claude as a custom connector so you can read and act on your pipeline
+          from a Claude chat. Each token acts as one Pulse user; Claude asks you to approve every
           write. Store tokens like passwords — only the hash is kept, and a token is shown once.
         </p>
         <ConnectorSettings

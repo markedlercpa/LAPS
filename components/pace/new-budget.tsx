@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
-import { createBudgetAction } from "@/app/(dashboard)/pace/budget-actions";
+import { createBudgetAction } from "@/app/(dashboard)/finance/budget-actions";
 
 export function NewBudgetButton({
   entities,
@@ -32,7 +32,7 @@ export function NewBudgetButton({
       });
       if (res.ok) {
         setOpen(false);
-        router.push(`/pace/budgets/${res.id}`);
+        router.push(`/finance/budgets/${res.id}`);
       } else setError(res.error);
     });
   }

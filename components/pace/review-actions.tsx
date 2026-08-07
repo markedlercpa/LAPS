@@ -3,7 +3,7 @@
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Printer, Lock } from "lucide-react";
-import { setPeriodStatusAction } from "@/app/(dashboard)/pace/actions";
+import { setPeriodStatusAction } from "@/app/(dashboard)/finance/actions";
 
 export function ReviewActions({
   entityId,

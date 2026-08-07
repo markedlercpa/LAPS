@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { startQboConnect } from "@/app/(dashboard)/pace/actions";
+import { startQboConnect } from "@/app/(dashboard)/finance/actions";
 
 /** Kicks off the QBO OAuth connect for one entity (redirects to Intuit). */
 export function EntityConnect({

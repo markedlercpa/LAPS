@@ -236,7 +236,7 @@ export function ProposalReader({
         </div>
 
         <div className="mt-8 border-t-2 border-divider pt-4 text-[12px] text-muted">
-          Edler Zain · This proposal was delivered electronically via LAPS.
+          Edler Zain · This proposal was delivered electronically via Pulse.
         </div>
       </div>
     </div>

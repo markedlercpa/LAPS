@@ -22,7 +22,7 @@ export default async function ReportingPage() {
       <PageHeader
         eyebrow="05 — Reporting"
         title="Reporting"
-        description="LAPS performance, open pipeline, and per-rep results."
+        description="Sales performance, open pipeline, and per-rep results."
       />
       <ReportingView laps={{ week, month, quarter }} pipeline={pipeline} reps={reps} />
     </div>

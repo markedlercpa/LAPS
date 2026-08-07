@@ -2,12 +2,12 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "End-User License Agreement — Edler Zain",
-  description: "The end-user license agreement governing use of Edler Zain's LAPS application.",
+  description: "The end-user license agreement governing use of Edler Zain's Pulse application.",
 };
 
 const UPDATED = "August 7, 2026";
 const COMPANY = "Edler Zain";
-const APP = "LAPS";
+const APP = "Pulse";
 const CONTACT = "privacy@edlerzain.com";
 
 export default function EulaPage() {

@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ArrowRight } from "lucide-react";
 import type { StapleStage } from "@prisma/client";
-import { acceptEngagement, advanceEngagement } from "@/app/(dashboard)/staple/actions";
+import { acceptEngagement, advanceEngagement } from "@/app/(dashboard)/work/actions";
 
 /**
  * Staging acceptance + stage-advance control. Shows the gate's blocking reasons

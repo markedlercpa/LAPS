@@ -10,9 +10,9 @@ const archivo = Archivo({
 });
 
 export const metadata: Metadata = {
-  title: "LAPS — Sales Cycle Management",
+  title: "Pulse — Edler Zain",
   description:
-    "Lead Generation, Appointments, Proposals, Sales — Edler Zain sales cycle management.",
+    "Pulse — Edler Zain's operating system: Marketing, Sales, Work, and Finance in one place.",
 };
 
 export default function RootLayout({

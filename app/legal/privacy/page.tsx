@@ -2,12 +2,12 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Privacy Policy — Edler Zain",
-  description: "How Edler Zain's LAPS application collects, uses, stores, and protects data, including data accessed from Intuit QuickBooks Online.",
+  description: "How Edler Zain's Pulse application collects, uses, stores, and protects data, including data accessed from Intuit QuickBooks Online.",
 };
 
 const UPDATED = "August 7, 2026";
 const COMPANY = "Edler Zain";
-const APP = "LAPS";
+const APP = "Pulse";
 const CONTACT = "privacy@edlerzain.com";
 
 export default function PrivacyPolicyPage() {

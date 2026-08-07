@@ -14,7 +14,7 @@ export default function SignInPage() {
     <div className="grid min-h-screen grid-cols-1 md:grid-cols-2">
       {/* Poster */}
       <div className="hidden flex-col justify-between bg-accent p-8 text-bg md:flex">
-        <div className="font-heading text-[34px] font-extrabold tracking-[-0.03em]">LAPS</div>
+        <div className="font-heading text-[34px] font-extrabold tracking-[-0.03em]">Pulse</div>
         <div>
           <div className="micro-label text-bg/80">Sales Cycle</div>
           <div className="mt-4">

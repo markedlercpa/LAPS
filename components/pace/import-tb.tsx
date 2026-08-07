@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Upload } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
-import { importTrialBalanceAction } from "@/app/(dashboard)/pace/actions";
+import { importTrialBalanceAction } from "@/app/(dashboard)/finance/actions";
 
 /** Paste a trial-balance CSV to load one entity/month. */
 export function ImportTbButton({ entityId }: { entityId: string }) {

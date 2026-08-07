@@ -13,32 +13,32 @@ const MODULES = [
     body: "Your Microsoft 365 inbox — read, reply, archive, tag, and turn messages into leads, tasks, or booked calls.",
   },
   {
-    name: "ECHO",
+    name: "Marketing",
     caption: "Content engine",
-    href: "/echo/evidence",
+    href: "/marketing/evidence",
     icon: Radio,
     body: "Evidence → Calling Cards → Housed Content → Optics. Build the language and content that earns trust.",
   },
   {
-    name: "LAPS",
+    name: "Sales",
     caption: "Sales cycle",
     href: "/pipeline",
     icon: Activity,
     body: "Pipeline, leads, appointments, proposals, and reporting — the full lead-to-close sales workflow.",
   },
   {
-    name: "STAPLE",
+    name: "Work",
     caption: "Delivery",
-    href: "/staple/engagements",
+    href: "/work/engagements",
     icon: Boxes,
     body: "Client delivery, stage by stage — Staging, Takeoff, Assemble, Package, Leverage, Evangelize. Won deals land here automatically.",
   },
   {
-    name: "PACE",
-    caption: "Finance",
-    href: "/pace/actuals",
+    name: "Finance",
+    caption: "Reporting & cash",
+    href: "/finance/actuals",
     icon: Gauge,
-    body: "Actuals from QuickBooks, budgets, rolling cash forecasts, and the live KPI pulse — the financial command layer across all entities.",
+    body: "Actuals from QuickBooks, general ledger, budgets, rolling cash forecasts, and the live KPI pulse — the financial command layer across all entities.",
   },
 ];
 
@@ -46,7 +46,7 @@ export default function HomePage() {
   return (
     <div>
       <PageHeader
-        eyebrow="Edler Zain — Operating System"
+        eyebrow="Pulse — Edler Zain"
         title="Home"
         description="Pick a module to work in."
       />

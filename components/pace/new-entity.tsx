@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
-import { createEntity } from "@/app/(dashboard)/pace/actions";
+import { createEntity } from "@/app/(dashboard)/finance/actions";
 import { ENTITY_KINDS, ENTITY_KIND_LABELS } from "@/lib/pace-taxonomy";
 
 export function NewEntityButton() {

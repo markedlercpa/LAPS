@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Save, Lock, Unlock } from "lucide-react";
 import type { StatementKind } from "@prisma/client";
-import { saveBudgetGridAction, setBudgetStatusAction } from "@/app/(dashboard)/pace/budget-actions";
+import { saveBudgetGridAction, setBudgetStatusAction } from "@/app/(dashboard)/finance/budget-actions";
 import { formatCurrency } from "@/lib/utils";
 
 export type BudgetGridRow = {

@@ -6,7 +6,7 @@ import { Plus } from "lucide-react";
 import type { ContentChannel } from "@prisma/client";
 import { Modal } from "@/components/ui/modal";
 import { CONTENT_CHANNELS, CONTENT_CHANNEL_LABELS } from "@/lib/echo-taxonomy";
-import { createMetricSnapshot } from "@/app/(dashboard)/echo/optics/actions";
+import { createMetricSnapshot } from "@/app/(dashboard)/marketing/optics/actions";
 
 type ItemOption = { id: string; title: string };
 

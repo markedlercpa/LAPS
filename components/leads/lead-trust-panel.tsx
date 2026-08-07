@@ -23,7 +23,7 @@ export type TrustSignalRow = {
 };
 
 /**
- * Lead detail trust panel: the ECHO→LAPS handoff made visible. Shows the
+ * Lead detail trust panel: the Marketing→Sales handoff made visible. Shows the
  * cached score + warmth band, the signal history, and a manual add form.
  * (Agents add signals via /api/agent/echo/trust; humans use this form.)
  */
@@ -62,7 +62,7 @@ export function LeadTrustPanel({
   return (
     <div className="border-2 border-divider bg-surface p-4">
       <div className="flex items-center justify-between">
-        <div className="micro-label">Trust score — earned in ECHO</div>
+        <div className="micro-label">Trust score — earned in Marketing</div>
         <span className={`tag ${band.tag}`}>{band.label}</span>
       </div>
 

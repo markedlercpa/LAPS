@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Check } from "lucide-react";
 import type { InfoStatus } from "@prisma/client";
 import { MicroLabel } from "@/components/micro-label";
-import { addInfo, markInfoReceived } from "@/app/(dashboard)/staple/actions";
+import { addInfo, markInfoReceived } from "@/app/(dashboard)/work/actions";
 
 export type InfoRow = {
   id: string;

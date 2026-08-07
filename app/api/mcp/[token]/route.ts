@@ -7,7 +7,7 @@ import { buildMcpHandler } from "@/lib/agent/mcp-server";
  * The connector URL is `${APP_URL}/api/mcp/<token>` — the token in the path is
  * the credential, so Claude needs only the URL (no OAuth, no headers). We never
  * emit an OAuth `WWW-Authenticate` challenge, so claude.ai does not switch into
- * OAuth mode. The resolved token maps to one LAPS user; that user becomes the
+ * OAuth mode. The resolved token maps to one Pulse user; that user becomes the
  * agent context for every tool call. Revocation is enforced here on every
  * request (before dispatching to the cached per-token handler).
  */

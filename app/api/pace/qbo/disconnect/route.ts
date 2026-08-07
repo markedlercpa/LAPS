@@ -32,7 +32,7 @@ export async function GET(req: Request) {
       data: { status: "disconnected", accessToken: null, refreshToken: null, expiresAt: null },
     });
   }
-  redirect("/pace/entities?qbo=disconnected");
+  redirect("/finance/entities?qbo=disconnected");
 }
 
 export const POST = GET;

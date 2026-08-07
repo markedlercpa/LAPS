@@ -12,7 +12,7 @@ import {
   CARD_STATUS_LABELS,
 } from "@/lib/echo-taxonomy";
 import { PillarPicker } from "./pillar-picker";
-import { createCallingCard } from "@/app/(dashboard)/echo/actions";
+import { createCallingCard } from "@/app/(dashboard)/marketing/actions";
 
 export function NewCallingCard({ bannedPhrases }: { bannedPhrases: string[] }) {
   const router = useRouter();

@@ -5,7 +5,7 @@ import { Sparkles, X, Send, Check, Ban, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * Embedded LAPS assistant — a floating, right-anchored chat drawer available on
+ * Embedded Pulse assistant — a floating, right-anchored chat drawer available on
  * every dashboard page. Reads run server-side automatically; any write pauses
  * for an in-chat confirmation card before it executes. The transcript lives in
  * client state (ephemeral, cleared on reload) and is re-sent to /api/agent/chat
@@ -124,8 +124,8 @@ export function ChatWidget() {
         <button
           onClick={() => setOpen(true)}
           className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center bg-accent text-bg shadow-lg transition-transform hover:scale-105"
-          aria-label="Open LAPS assistant"
-          title="LAPS assistant"
+          aria-label="Open Pulse assistant"
+          title="Pulse assistant"
         >
           <Sparkles className="h-6 w-6" />
         </button>
@@ -146,7 +146,7 @@ export function ChatWidget() {
             <div className="flex items-center justify-between border-b-2 border-ink px-4 py-3">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-accent" />
-                <span className="font-heading text-[15px] font-extrabold">LAPS Assistant</span>
+                <span className="font-heading text-[15px] font-extrabold">Pulse Assistant</span>
               </div>
               <div className="flex items-center gap-1">
                 {bubbles.length > 0 && (
@@ -168,7 +168,7 @@ export function ChatWidget() {
             <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
               {bubbles.length === 0 && (
                 <div className="mt-6 text-[13px] text-muted">
-                  <p className="mb-2 font-heading font-extrabold text-ink">Ask me to run tasks in LAPS.</p>
+                  <p className="mb-2 font-heading font-extrabold text-ink">Ask me to run tasks in Pulse.</p>
                   <p className="mb-1">Reads happen instantly. Writes (create, update, delete, send, book) show a confirmation card before anything changes.</p>
                   <ul className="mt-3 list-disc space-y-1 pl-4">
                     <li>“What’s in my pipeline at proposal stage?”</li>

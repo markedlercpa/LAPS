@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw } from "lucide-react";
-import { syncQboActualsAction } from "@/app/(dashboard)/pace/actions";
+import { syncQboActualsAction } from "@/app/(dashboard)/finance/actions";
 
 function monthLabel(ym: string): string {
   // ym = "YYYY-MM"

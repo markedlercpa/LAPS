@@ -19,7 +19,7 @@ import {
   CONSENT_LABELS,
 } from "@/lib/echo-taxonomy";
 import { PillarPicker } from "./pillar-picker";
-import { createEvidence } from "@/app/(dashboard)/echo/actions";
+import { createEvidence } from "@/app/(dashboard)/marketing/actions";
 
 export function NewEvidence() {
   const router = useRouter();

@@ -23,7 +23,7 @@ import {
   toggleEvidenceLink,
   toggleCardLink,
   repurposeContentItem,
-} from "@/app/(dashboard)/echo/content/actions";
+} from "@/app/(dashboard)/marketing/content/actions";
 
 type EvidenceRef = { id: string; label: string; type: EvidenceType };
 type CardRef = { id: string; text: string; category: CardCategory };
@@ -117,7 +117,7 @@ export function ContentEditor({
   const repurpose = (toChannel: ContentChannel) =>
     startTransition(async () => {
       const res = await repurposeContentItem(item.id, toChannel);
-      if (res.ok) router.push(`/echo/content/${res.id}`);
+      if (res.ok) router.push(`/marketing/content/${res.id}`);
       else setError(res.error ?? "Repurpose failed");
     });
 
@@ -311,14 +311,14 @@ export function ContentEditor({
           {source && (
             <p className="mt-2 text-[12px] text-muted">
               Repurposed from{" "}
-              <Link href={`/echo/content/${source.id}`} className="text-accent-700">{source.title}</Link>
+              <Link href={`/marketing/content/${source.id}`} className="text-accent-700">{source.title}</Link>
             </p>
           )}
           {derivatives.length > 0 && (
             <div className="mt-2">
               <div className="text-[11px] uppercase tracking-[.08em] text-neutral-600">Derivatives</div>
               {derivatives.map((d) => (
-                <Link key={d.id} href={`/echo/content/${d.id}`} className="mt-1 block text-[12px] text-accent-700">
+                <Link key={d.id} href={`/marketing/content/${d.id}`} className="mt-1 block text-[12px] text-accent-700">
                   {CONTENT_CHANNEL_LABELS[d.channel]} — {d.title}
                 </Link>
               ))}

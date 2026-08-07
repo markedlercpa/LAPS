@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Sparkles, Check } from "lucide-react";
 import type { VarianceRow } from "@/lib/pace/variance";
 import { formatCurrency } from "@/lib/utils";
-import { draftNarrativeAction, saveNarrativeAction } from "@/app/(dashboard)/pace/budget-actions";
+import { draftNarrativeAction, saveNarrativeAction } from "@/app/(dashboard)/finance/budget-actions";
 
 export type VarianceViewRow = VarianceRow & { note: string | null };
 

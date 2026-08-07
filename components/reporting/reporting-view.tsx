@@ -27,7 +27,7 @@ export function ReportingView({
       <div className="seg">
         {(
           [
-            ["laps", "LAPS performance"],
+            ["laps", "Sales performance"],
             ["pipeline", "Open pipeline"],
             ["reps", "Sales reps"],
           ] as [Tab, string][]
@@ -77,7 +77,7 @@ function LapsPerformance({ laps }: { laps: LapsBundle }) {
       {/* Chart */}
       <div className="mt-6 border-t-2 border-divider pt-6">
         <div className="flex items-center justify-between">
-          <MicroLabel>LAPS throughput</MicroLabel>
+          <MicroLabel>Sales throughput</MicroLabel>
           <div className="flex flex-wrap gap-4">
             {SERIES.map((s) => (
               <span key={s.key} className="flex items-center gap-1.5">

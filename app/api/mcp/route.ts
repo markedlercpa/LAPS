@@ -17,7 +17,7 @@ function info() {
       error: {
         code: -32001,
         message:
-          "Missing connector token. Use the tokenized URL /api/mcp/<token> from LAPS → Settings → Claude connector.",
+          "Missing connector token. Use the tokenized URL /api/mcp/<token> from Pulse → Settings → Claude connector.",
       },
     },
     { status: 404 },
