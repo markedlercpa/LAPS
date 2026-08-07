@@ -54,7 +54,7 @@ export function ConnectorSettings({
   const [pending, startTransition] = useTransition();
   const [newToken, setNewToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const mcpUrl = `${appUrl.replace(/\/$/, "")}/api/mcp`;
+  const base = appUrl.replace(/\/$/, "");
 
   function generate() {
     if (!name.trim() || pending) return;
@@ -82,13 +82,15 @@ export function ConnectorSettings({
     <div>
       <div className="card mb-6">
         <div className="micro-label mb-2">How to connect</div>
-        <ol className="mb-4 list-decimal space-y-1 pl-5 text-[14px]">
+        <ol className="mb-2 list-decimal space-y-1 pl-5 text-[14px]">
+          <li>Generate a token below — it produces a personal connector URL (the token is part of the URL).</li>
           <li>In claude.ai, open <strong>Settings → Connectors → Add custom connector</strong>.</li>
-          <li>Paste the URL below.</li>
-          <li>Open <strong>Advanced → request headers</strong> and add an <code>Authorization</code> header with the value <code>Bearer &lt;your token&gt;</code>.</li>
+          <li>Paste your connector URL. Leave the OAuth Client ID / Secret <strong>blank</strong> — the URL carries the credential.</li>
           <li>Save, then enable LAPS in a chat&apos;s tools. (Custom connectors need a paid Claude plan.)</li>
         </ol>
-        <CopyField label="Connector URL" value={mcpUrl} />
+        <p className="mb-0 text-[13px] text-muted">
+          Treat the connector URL like a password — anyone with it can act as you in LAPS. Revoke a token anytime below.
+        </p>
       </div>
 
       {isAdmin ? (
@@ -114,8 +116,8 @@ export function ConnectorSettings({
 
           {newToken && (
             <div className="card mb-6 border-2 border-ink">
-              <div className="micro-label mb-1 text-accent-700">Copy this token now — it won&apos;t be shown again</div>
-              <CopyField label="Authorization header value" value={`Bearer ${newToken}`} />
+              <div className="micro-label mb-1 text-accent-700">Copy this URL now — it won&apos;t be shown again</div>
+              <CopyField label="Connector URL (paste into claude.ai)" value={`${base}/api/mcp/${newToken}`} />
               <button className="btn btn-ghost text-[12px]" onClick={() => setNewToken(null)}>
                 Done
               </button>
