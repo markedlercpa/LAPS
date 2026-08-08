@@ -634,18 +634,25 @@ export function parseAgingDetail(report: QboReportFull): AgingItem[] {
   const iDue = pick(["due_date", "duedate"]);
   const iName = pick(["cust_name", "name", "vend_name", "customer", "vendor"]);
   const iDoc = pick(["doc_num"]);
-  const iAmt = pick(["open_bal", "subt_open_bal", "amount", "subt_nat_amount", "nat_open_bal"]);
-  const num = (s?: string) => Number(String(s ?? "").replace(/,/g, "")) || 0;
+  // The open-amount column key varies across QBO aging reports; if none of the
+  // known keys match, fall back to the last column (aging detail puts the open
+  // balance last).
+  const iAmt = pick(["open_bal", "subt_open_bal", "open_balance", "amount", "subt_nat_amount", "nat_open_bal"]) ?? (cols.length ? cols.length - 1 : undefined);
+  const num = (s?: string) => Number(String(s ?? "").replace(/[,$]/g, "")) || 0;
   const out: AgingItem[] = [];
 
-  const walk = (rows?: QboRow[]) => {
+  // Customer/vendor is often a section header, not a column — carry it down.
+  const walk = (rows: QboRow[] | undefined, groupName: string) => {
     for (const r of rows ?? []) {
+      const header = (r as { Header?: { ColData?: QboColData[] } }).Header;
+      const name = header?.ColData?.[0]?.value?.trim() || groupName;
       if (r.ColData && iAmt !== undefined) {
         const amount = num(r.ColData[iAmt]?.value);
         const date = iDate !== undefined ? r.ColData[iDate]?.value?.trim() : undefined;
-        if (Math.abs(amount) >= 0.005 && (date === undefined || /^\d{4}-\d{2}-\d{2}/.test(date ?? ""))) {
+        const isDataRow = iDate === undefined || /^\d{4}-\d{2}-\d{2}/.test(date ?? "");
+        if (Math.abs(amount) >= 0.005 && isDataRow) {
           out.push({
-            name: (iName !== undefined ? r.ColData[iName]?.value?.trim() : "") || "—",
+            name: (iName !== undefined ? r.ColData[iName]?.value?.trim() : "") || name || "—",
             docNumber: iDoc !== undefined ? r.ColData[iDoc]?.value?.trim() || undefined : undefined,
             txnDate: date ? date.slice(0, 10) : undefined,
             dueDate: iDue !== undefined ? r.ColData[iDue]?.value?.trim()?.slice(0, 10) || undefined : undefined,
@@ -653,10 +660,10 @@ export function parseAgingDetail(report: QboReportFull): AgingItem[] {
           });
         }
       }
-      if (r.Rows?.Row) walk(r.Rows.Row);
+      if (r.Rows?.Row) walk(r.Rows.Row, name);
     }
   };
-  walk(report.Rows?.Row);
+  walk(report.Rows?.Row, "");
   return out;
 }
 

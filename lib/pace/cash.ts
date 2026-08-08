@@ -112,6 +112,15 @@ async function effectiveOpening(config: Awaited<ReturnType<typeof getCashConfig>
 // ── Direct forecast (14-day / 13-week) ───────────────────────────────────────
 export type StatementRow = { key: string; label: string; values: number[]; total: number };
 export type StatementGroup = { title: string; rows: StatementRow[]; subtotalLabel: string; subtotal: number[]; subtotalTotal: number };
+export type CashSources = {
+  qboConfigured: boolean;
+  qboConnectedEntities: number;
+  arItems: number;
+  apItems: number;
+  arCents: number; // total AR spread into the horizon
+  apCents: number; // total AP spread into the horizon
+  wipCents: number;
+};
 export type DirectForecast = {
   mode: CashMode;
   columns: Column[];
@@ -124,6 +133,7 @@ export type DirectForecast = {
   loc: { balance: number[]; availability: number[]; totalLiquidity: number[]; limitCents: number };
   minThreshold: number;
   cushion: number[];
+  sources: CashSources;
 };
 
 const sum = (a: number[]) => a.reduce((s, x) => s + x, 0);
@@ -203,22 +213,32 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
   // Auto: AR / AP aging detail from QBO, spread into collections / disbursements
   // by due date (overdue lands in the first column, beyond-horizon drops off).
   // Auto-fed but overridable — manual assumption lines layer on top.
-  const spreadAging = (items: AgingItem[], target: string, sign: 1 | -1) => {
+  const sources: CashSources = { qboConfigured: qboConfigured(), qboConnectedEntities: 0, arItems: 0, apItems: 0, arCents: 0, apCents: 0, wipCents: 0 };
+  const spreadAging = (items: AgingItem[], target: string, sign: 1 | -1): { items: number; cents: number } => {
+    let placed = 0;
+    let cents = 0;
     for (const it of items) {
       const raw = it.dueDate || it.txnDate;
       const d = raw ? new Date(`${raw}T00:00:00Z`) : h0;
       if (Number.isNaN(d.getTime())) continue;
       const when = d.getTime() < h0.getTime() ? h0 : d; // overdue → first period
       const i = columnIndexForDate(columns, mode, when);
-      if (i >= 0) cat[target][i] += Math.round(it.amount * 100) * sign;
+      if (i >= 0) {
+        const c = Math.round(it.amount * 100);
+        cat[target][i] += c * sign;
+        placed += 1;
+        cents += c;
+      }
     }
+    return { items: placed, cents };
   };
-  if (qboConfigured()) {
+  if (sources.qboConfigured) {
     const conns = await prisma.ledgerConnection.findMany({ where: { provider: "QBO", status: "connected" }, select: { entityId: true } });
+    sources.qboConnectedEntities = conns.length;
     for (const c of conns) {
       const [ar, ap] = await Promise.all([pullArAging(c.entityId), pullApAging(c.entityId)]);
-      if (ar) spreadAging(ar, "ar_collections", 1);
-      if (ap) spreadAging(ap, "ap_payments", -1);
+      if (ar) { const r = spreadAging(ar, "ar_collections", 1); sources.arItems += r.items; sources.arCents += r.cents; }
+      if (ap) { const r = spreadAging(ap, "ap_payments", -1); sources.apItems += r.items; sources.apCents += r.cents; }
     }
   }
 
@@ -240,6 +260,7 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
     if (remaining > 0) {
       const perCol = Math.round(remaining / n);
       for (let i = 0; i < n; i++) cat.wip_collections[i] += perCol;
+      sources.wipCents = perCol * n;
     }
   }
 
@@ -292,6 +313,7 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
     loc: { balance: locBalance, availability: locAvail, totalLiquidity, limitCents: limit },
     minThreshold,
     cushion,
+    sources,
   };
 }
 

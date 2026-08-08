@@ -51,11 +51,36 @@ async function DirectView(mode: "daily" | "weekly") {
           { label: "Lowest liquidity", value: usd(Math.min(...f.loc.totalLiquidity)) },
         ]}
       />
+      <AutoFeedNote f={f} mode={mode} />
       <div className="mt-6">
         <CashStatement f={f} />
       </div>
     </>
   );
+}
+
+/** Shows what auto-fed the statement (QBO AR/AP aging, WIP) so the feature is
+ * visible and self-diagnosing — and says plainly when nothing flowed. */
+function AutoFeedNote({ f, mode }: { f: Awaited<ReturnType<typeof buildDirectForecast>>; mode: "daily" | "weekly" }) {
+  const s = f.sources;
+  let body: React.ReactNode;
+  if (!s.qboConfigured) {
+    body = <>QuickBooks isn&apos;t configured, so <strong>AR Collections</strong> and <strong>AP Payments</strong> aren&apos;t auto-fed. Connect QBO, or add lines under <Link className="text-accent-700" href="/finance/cash/assumptions">Assumptions</Link>.</>;
+  } else if (s.qboConnectedEntities === 0) {
+    body = <>No QBO-connected entity — AR/AP aging can&apos;t be pulled. Connect one under <Link className="text-accent-700" href="/finance/entities">Entities</Link>.</>;
+  } else if (s.arItems === 0 && s.apItems === 0) {
+    body = <>QuickBooks is connected but no open AR/AP items landed in this {mode === "daily" ? "14-day" : "13-week"} window. Most invoices sit further out — try the <strong>13-week</strong> view (overdue items land in the first period).</>;
+  } else {
+    body = (
+      <>
+        <strong>Auto-fed from QuickBooks aging:</strong> {s.arItems} AR invoice{s.arItems === 1 ? "" : "s"} ({usd(s.arCents)}) → AR Collections;{" "}
+        {s.apItems} AP bill{s.apItems === 1 ? "" : "s"} ({usd(s.apCents)}) → AP Payments
+        {mode === "weekly" && s.wipCents > 0 ? <>; WIP {usd(s.wipCents)} → WIP Collections</> : null}. Spread by due date — override with lines under{" "}
+        <Link className="text-accent-700" href="/finance/cash/assumptions">Assumptions</Link>.
+      </>
+    );
+  }
+  return <p className="mt-3 rounded-sm border-l-2 border-accent bg-surface px-3 py-2 text-[12px] text-muted">{body}</p>;
 }
 
 async function MonthlyView() {
