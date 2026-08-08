@@ -13,6 +13,7 @@ export const CASH_CATEGORIES: CashCategoryDef[] = [
   { key: "other_receipts", label: "Other Receipts", section: "RECEIPTS", sign: 1 },
 
   { key: "ap_payments", label: "AP Payments", section: "DISBURSEMENTS", sign: -1 },
+  { key: "contractor_payments", label: "Contractor Payments", section: "DISBURSEMENTS", sign: -1 },
   { key: "accrued_liability", label: "Accrued Liability Payments", section: "DISBURSEMENTS", sign: -1 },
   { key: "credit_card", label: "Credit Card Payments", section: "DISBURSEMENTS", sign: -1 },
   { key: "payroll", label: "Payroll", section: "DISBURSEMENTS", sign: -1 },

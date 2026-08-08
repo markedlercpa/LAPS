@@ -609,6 +609,87 @@ export function parseQboBudgets(payload: unknown): QboBudget[] {
   return budgets.map((b, i) => parseBudgetEntity(b, i));
 }
 
+// ── AR / AP aging detail (cash-forecast collections + disbursements) ─────────
+export type AgingItem = {
+  name: string; // customer (AR) or vendor (AP)
+  docNumber?: string;
+  txnDate?: string; // "YYYY-MM-DD"
+  dueDate?: string; // "YYYY-MM-DD" — drives which cash column it lands in
+  amount: number; // open balance, positive
+};
+
+/**
+ * Parse a QBO AgedReceivableDetail / AgedPayableDetail report into flat open
+ * items with their due dates. Columns are matched by key (order varies); the
+ * open amount prefers the "open_bal"/"subt_open_bal" column, else "amount".
+ */
+export function parseAgingDetail(report: QboReportFull): AgingItem[] {
+  const cols = report.Columns?.Column ?? [];
+  const idx = columnIndex(cols);
+  const pick = (keys: string[]): number | undefined => {
+    for (const k of keys) if (idx[k] !== undefined) return idx[k];
+    return undefined;
+  };
+  const iDate = pick(["tx_date", "date"]);
+  const iDue = pick(["due_date", "duedate"]);
+  const iName = pick(["cust_name", "name", "vend_name", "customer", "vendor"]);
+  const iDoc = pick(["doc_num"]);
+  const iAmt = pick(["open_bal", "subt_open_bal", "amount", "subt_nat_amount", "nat_open_bal"]);
+  const num = (s?: string) => Number(String(s ?? "").replace(/,/g, "")) || 0;
+  const out: AgingItem[] = [];
+
+  const walk = (rows?: QboRow[]) => {
+    for (const r of rows ?? []) {
+      if (r.ColData && iAmt !== undefined) {
+        const amount = num(r.ColData[iAmt]?.value);
+        const date = iDate !== undefined ? r.ColData[iDate]?.value?.trim() : undefined;
+        if (Math.abs(amount) >= 0.005 && (date === undefined || /^\d{4}-\d{2}-\d{2}/.test(date ?? ""))) {
+          out.push({
+            name: (iName !== undefined ? r.ColData[iName]?.value?.trim() : "") || "—",
+            docNumber: iDoc !== undefined ? r.ColData[iDoc]?.value?.trim() || undefined : undefined,
+            txnDate: date ? date.slice(0, 10) : undefined,
+            dueDate: iDue !== undefined ? r.ColData[iDue]?.value?.trim()?.slice(0, 10) || undefined : undefined,
+            amount,
+          });
+        }
+      }
+      if (r.Rows?.Row) walk(r.Rows.Row);
+    }
+  };
+  walk(report.Rows?.Row);
+  return out;
+}
+
+async function pullAgingReport(entityId: string, report: "AgedReceivableDetail" | "AgedPayableDetail"): Promise<AgingItem[] | null> {
+  const auth = await getAccessToken(entityId);
+  if (!auth) return null;
+  const url = `${apiBase()}/v3/company/${auth.realmId}/reports/${report}?minorversion=70`;
+  try {
+    const res = await fetchWithRetry(url, { headers: { Authorization: `Bearer ${auth.token}`, Accept: "application/json" } });
+    if (res.status === 401) {
+      await markNeedsReconnect(entityId);
+      return null;
+    }
+    if (!res.ok) {
+      console.error(`QBO ${report} failed:`, res.status);
+      return null;
+    }
+    return parseAgingDetail((await res.json()) as QboReportFull);
+  } catch (err) {
+    console.error(`QBO ${report} error:`, err);
+    return null;
+  }
+}
+
+/** Open AR invoices with due dates (for cash collections). Null when not connected. */
+export function pullArAging(entityId: string): Promise<AgingItem[] | null> {
+  return pullAgingReport(entityId, "AgedReceivableDetail");
+}
+/** Open AP bills with due dates (for cash disbursements). Null when not connected. */
+export function pullApAging(entityId: string): Promise<AgingItem[] | null> {
+  return pullAgingReport(entityId, "AgedPayableDetail");
+}
+
 // ── QBO report parsing ──────────────────────────────────────────────────────
 type QboColData = { value?: string; id?: string };
 type QboRow = { type?: string; ColData?: QboColData[]; Rows?: { Row?: QboRow[] } };

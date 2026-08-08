@@ -55,6 +55,8 @@ const lineSchema = z.object({
   cadence: z.enum(["ONE_TIME", "WEEKLY", "BIWEEKLY", "MONTHLY"]),
   startDate: z.string().min(1, "Pick a start date"),
   endDate: z.string().optional(),
+  netTermsDays: z.coerce.number().int().min(0).max(180).optional().or(z.nan().transform(() => undefined)),
+  paidWhenPaid: z.coerce.boolean().optional(),
 });
 
 export async function addCashLineAction(input: unknown) {
@@ -69,6 +71,8 @@ export async function addCashLineAction(input: unknown) {
     cadence: parsed.data.cadence,
     startDate: parsed.data.startDate,
     endDate: parsed.data.endDate || null,
+    netTermsDays: parsed.data.netTermsDays == null || Number.isNaN(parsed.data.netTermsDays) ? null : parsed.data.netTermsDays,
+    paidWhenPaid: parsed.data.paidWhenPaid ?? false,
     createdBy: userId,
   });
   revalidatePath("/finance/cash");

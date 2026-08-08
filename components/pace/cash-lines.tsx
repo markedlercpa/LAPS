@@ -38,6 +38,8 @@ export function CashLines({ rows }: { rows: CashLineRow[] }) {
         cadence: fd.get("cadence"),
         startDate: fd.get("startDate"),
         endDate: fd.get("endDate") || undefined,
+        netTermsDays: fd.get("netTermsDays") || undefined,
+        paidWhenPaid: fd.get("paidWhenPaid") === "on",
       });
       if (res.ok) {
         router.refresh();
@@ -89,6 +91,13 @@ export function CashLines({ rows }: { rows: CashLineRow[] }) {
         <label className="field">
           <span className="micro-label">End (optional)</span>
           <input name="endDate" type="date" className="input" />
+        </label>
+        <label className="field">
+          <span className="micro-label">Net terms (days)</span>
+          <input name="netTermsDays" type="number" min="0" max="180" className="input w-24 text-right" placeholder="e.g. 30" title="Contractor net terms — shifts the payment forward by this many days (net-15 / net-30)." />
+        </label>
+        <label className="flex items-center gap-1.5 pb-2 text-[12px]" title="Pay only once the matching customer cash is collected (modeled as the net-terms shift).">
+          <input name="paidWhenPaid" type="checkbox" /> Paid when paid
         </label>
         <button type="submit" className="btn btn-primary" disabled={pending}><Plus className="h-4 w-4" /> Add line</button>
         {msg && <span className="pb-2 text-[12px] text-accent-700">{msg}</span>}

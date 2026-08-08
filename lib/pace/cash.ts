@@ -3,6 +3,7 @@ import { isoWeekOf, isoWeekStart } from "@/lib/work-taxonomy";
 import { rateForBandWeek } from "@/lib/work/capacity";
 import { latestBankCashCents } from "@/lib/pace/statements";
 import { classifyAccount } from "@/lib/pace/qbo-taxonomy";
+import { qboConfigured, pullArAging, pullApAging, type AgingItem } from "@/lib/pace/qbo";
 import { CASH_CATEGORY_MAP, categoriesFor, type CashMode } from "@/lib/pace/cash-taxonomy";
 
 /**
@@ -153,11 +154,17 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
     mode === "weekly" ? prisma.portfolio.findMany({ where: { active: true }, select: { directorCostCentsAnnual: true } }) : Promise.resolve([] as { directorCostCentsAnnual: number }[]),
   ]);
 
-  // Manual lines → their category row (signed).
+  // Manual lines → their category row (signed). Contractor terms shift each
+  // disbursement forward by the net terms (net-15 / net-30); paid-when-paid is
+  // modeled as that same forward shift, aligning the payment to when the
+  // matching customer cash is expected in.
+  const addDays = (d: Date, days: number) => new Date(d.getTime() + days * 86_400_000);
   for (const l of lines) {
     const def = CASH_CATEGORY_MAP[l.category];
     if (!def) continue;
-    for (const d of occurrences({ category: l.category, amountCents: l.amountCents, cadence: l.cadence, startDate: l.startDate, endDate: l.endDate }, h0, hN)) {
+    const shift = l.netTermsDays ?? 0;
+    for (const d0 of occurrences({ category: l.category, amountCents: l.amountCents, cadence: l.cadence, startDate: l.startDate, endDate: l.endDate }, h0, hN)) {
+      const d = shift ? addDays(d0, shift) : d0;
       const i = columnIndexForDate(columns, mode, d);
       if (i >= 0) cat[l.category][i] += l.amountCents * def.sign;
     }
@@ -191,6 +198,49 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
     const directorAnnual = portfolios.reduce((s, p) => s + p.directorCostCentsAnnual, 0);
     const perWeek = Math.round(directorAnnual / 52);
     for (let i = 0; i < n; i++) cat.payroll[i] += -perWeek;
+  }
+
+  // Auto: AR / AP aging detail from QBO, spread into collections / disbursements
+  // by due date (overdue lands in the first column, beyond-horizon drops off).
+  // Auto-fed but overridable — manual assumption lines layer on top.
+  const spreadAging = (items: AgingItem[], target: string, sign: 1 | -1) => {
+    for (const it of items) {
+      const raw = it.dueDate || it.txnDate;
+      const d = raw ? new Date(`${raw}T00:00:00Z`) : h0;
+      if (Number.isNaN(d.getTime())) continue;
+      const when = d.getTime() < h0.getTime() ? h0 : d; // overdue → first period
+      const i = columnIndexForDate(columns, mode, when);
+      if (i >= 0) cat[target][i] += Math.round(it.amount * 100) * sign;
+    }
+  };
+  if (qboConfigured()) {
+    const conns = await prisma.ledgerConnection.findMany({ where: { provider: "QBO", status: "connected" }, select: { entityId: true } });
+    for (const c of conns) {
+      const [ar, ap] = await Promise.all([pullArAging(c.entityId), pullApAging(c.entityId)]);
+      if (ar) spreadAging(ar, "ar_collections", 1);
+      if (ap) spreadAging(ap, "ap_payments", -1);
+    }
+  }
+
+  // Auto (weekly): WIP → collections. Earned-but-unbilled on active engagements
+  // (remaining unrecognized contract revenue) converts to cash across the
+  // horizon — an estimate, layered with manual overrides.
+  if (mode === "weekly") {
+    const engagements = await prisma.portfolioEngagement.findMany({
+      where: { status: "active" },
+      select: { revenueCents: true, budgets: { select: { budgetedHours: true } }, bookings: { select: { hoursConsumed: true } } },
+    });
+    let remaining = 0;
+    for (const e of engagements) {
+      const budget = e.budgets.reduce((s, b) => s + Number(b.budgetedHours), 0);
+      const consumed = e.bookings.reduce((s, b) => s + Number(b.hoursConsumed), 0);
+      const pctComplete = budget > 0 ? Math.min(1, consumed / budget) : 0;
+      remaining += Math.round(e.revenueCents * (1 - pctComplete));
+    }
+    if (remaining > 0) {
+      const perCol = Math.round(remaining / n);
+      for (let i = 0; i < n; i++) cat.wip_collections[i] += perCol;
+    }
   }
 
   const mkGroup = (title: string, section: "RECEIPTS" | "DISBURSEMENTS" | "FINANCING", subtotalLabel: string): StatementGroup => {
@@ -449,6 +499,8 @@ export async function addCashLine(input: {
   cadence: "ONE_TIME" | "WEEKLY" | "BIWEEKLY" | "MONTHLY";
   startDate: string;
   endDate?: string | null;
+  netTermsDays?: number | null;
+  paidWhenPaid?: boolean;
   createdBy?: string | null;
 }) {
   return prisma.cashFlowLine.create({
@@ -459,6 +511,8 @@ export async function addCashLine(input: {
       cadence: input.cadence,
       startDate: new Date(input.startDate),
       endDate: input.endDate ? new Date(input.endDate) : null,
+      netTermsDays: input.netTermsDays ?? null,
+      paidWhenPaid: input.paidWhenPaid ?? false,
       createdBy: input.createdBy ?? null,
     },
   });
