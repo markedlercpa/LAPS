@@ -18,6 +18,8 @@ export type LeadFormValues = {
   email: string;
   phone: string;
   notes: string;
+  revenueEstimate: string;
+  headcountEstimate: string;
 };
 
 const EMPTY: LeadFormValues = {
@@ -28,6 +30,8 @@ const EMPTY: LeadFormValues = {
   email: "",
   phone: "",
   notes: "",
+  revenueEstimate: "",
+  headcountEstimate: "",
 };
 
 export function LeadForm({
@@ -100,6 +104,29 @@ export function LeadForm({
       <div className="space-y-1.5">
         <Label>Email</Label>
         <Input type="email" value={values.email} onChange={(e) => set("email", e.target.value)} />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label>Est. revenue ($)</Label>
+          <Input
+            type="number"
+            min={0}
+            step={1000}
+            placeholder="e.g. 5000000"
+            value={values.revenueEstimate}
+            onChange={(e) => set("revenueEstimate", e.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Est. headcount</Label>
+          <Input
+            type="number"
+            min={0}
+            placeholder="e.g. 40"
+            value={values.headcountEstimate}
+            onChange={(e) => set("headcountEstimate", e.target.value)}
+          />
+        </div>
       </div>
       <div className="space-y-1.5">
         <Label>Notes</Label>

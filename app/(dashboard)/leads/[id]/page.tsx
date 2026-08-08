@@ -97,6 +97,8 @@ export default async function LeadDetailPage({
               email: lead.email ?? "",
               phone: lead.phone ?? "",
               notes: lead.notes ?? "",
+              revenueEstimate: lead.revenueEstimate != null ? String(lead.revenueEstimate) : "",
+              headcountEstimate: lead.headcountEstimate != null ? String(lead.headcountEstimate) : "",
             }}
           />
         </div>

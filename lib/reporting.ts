@@ -20,6 +20,9 @@ type Bucket = {
   end: Date;
 };
 
+/** Selectable pipeline windows (days). */
+export const PIPELINE_WINDOWS = [30, 60, 90, 180, 365] as const;
+
 function buildBuckets(period: Period, count: number): Bucket[] {
   const now = new Date();
   const buckets: Bucket[] = [];
@@ -176,9 +179,9 @@ export type PipelineOverview = {
   funnel: FunnelRow[];
 };
 
-/** Owner-facing pipeline overview — headline metrics + 90-day funnel. Derived. */
-export async function getPipelineOverview(): Promise<PipelineOverview> {
-  const start = new Date(Date.now() - 90 * 86_400_000);
+/** Owner-facing pipeline overview — headline metrics + windowed funnel. Derived. */
+export async function getPipelineOverview(windowDays = 90): Promise<PipelineOverview> {
+  const start = new Date(Date.now() - windowDays * 86_400_000);
 
   const [open, leadsCreated, apptsBooked, proposals] = await Promise.all([
     getOpenPipeline(),
@@ -257,13 +260,15 @@ export type RepRow = {
   avgCycleDays: number | null; // lead created -> proposal won
 };
 
-/** Per-rep performance: closed-won volume, close rate, avg sales cycle. */
-export async function getRepReport(): Promise<RepRow[]> {
+/** Per-rep performance: closed-won volume, close rate, avg sales cycle.
+ * `windowDays` restricts to proposals created in the window; omit for all time. */
+export async function getRepReport(windowDays?: number): Promise<RepRow[]> {
   const reps = await prisma.user.findMany({
     select: { id: true, name: true, email: true },
   });
 
   const proposals = await prisma.proposal.findMany({
+    where: windowDays ? { createdAt: { gte: new Date(Date.now() - windowDays * 86_400_000) } } : {},
     select: {
       ownerId: true,
       status: true,
@@ -295,4 +300,151 @@ export async function getRepReport(): Promise<RepRow[]> {
       };
     })
     .sort((a, b) => b.wonValue - a.wonValue);
+}
+
+// ── Detailed performance (drill-down + targets) ─────────────────────────────
+
+export type DetailItem = { id: string; label: string; href: string; sub: string };
+
+export type PeriodDetail = {
+  leads: DetailItem[];
+  appts: DetailItem[];
+  proposals: DetailItem[];
+  deals: DetailItem[];
+};
+
+export type TargetSet = {
+  leads: number | null;
+  apptsBooked: number | null;
+  proposalsSent: number | null;
+  dealsWon: number | null;
+  wonValue: number | null;
+};
+
+export type LapsRowDetailed = LapsRow & {
+  /** "YYYY-MM-DD" of the bucket start — the key targets are stored under. */
+  startKey: string;
+  detail: PeriodDetail;
+  targets: TargetSet | null;
+};
+
+function leadLabel(l: { firstName: string; lastName: string; companyName: string | null }) {
+  return l.companyName ?? `${l.firstName} ${l.lastName}`;
+}
+
+/**
+ * LAPS throughput with, per bucket, the underlying records (drill-down) and
+ * the period's targets. Powers the expandable reporting table.
+ */
+export async function getLapsPerformanceDetailed(
+  period: Period,
+  count = 8,
+): Promise<LapsRowDetailed[]> {
+  const buckets = buildBuckets(period, count);
+  const windowStart = buckets[0].start;
+
+  const [leads, appts, proposals, targets] = await Promise.all([
+    prisma.lead.findMany({
+      where: { createdAt: { gte: windowStart } },
+      select: { id: true, firstName: true, lastName: true, companyName: true, leadSource: true, createdAt: true },
+    }),
+    prisma.appointment.findMany({
+      where: { scheduledAt: { gte: windowStart } },
+      select: {
+        id: true,
+        title: true,
+        scheduledAt: true,
+        status: true,
+        lead: { select: { id: true, firstName: true, lastName: true, companyName: true } },
+      },
+    }),
+    prisma.proposal.findMany({
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        sentAt: true,
+        wonAt: true,
+        lead: { select: { firstName: true, lastName: true, companyName: true } },
+        lineItems: { select: { quantity: true, unitPrice: true } },
+      },
+    }),
+    prisma.salesTarget.findMany({ where: { granularity: period } }),
+  ]);
+
+  const targetByKey = new Map(
+    targets.map((t) => [
+      t.periodStart.toISOString().slice(0, 10),
+      {
+        leads: t.leads,
+        apptsBooked: t.apptsBooked,
+        proposalsSent: t.proposalsSent,
+        dealsWon: t.dealsWon,
+        wonValue: t.wonValue == null ? null : Number(t.wonValue),
+      } satisfies TargetSet,
+    ]),
+  );
+
+  return buckets.map((b) => {
+    const startKey = format(b.start, "yyyy-MM-dd");
+    const bLeads = leads.filter((l) => inBucket(l.createdAt, b));
+    const bAppts = appts.filter((a) => inBucket(a.scheduledAt, b));
+    const bSent = proposals.filter((p) => inBucket(p.sentAt, b));
+    const bWon = proposals.filter((p) => p.status === "WON" && inBucket(p.wonAt, b));
+
+    const detail: PeriodDetail = {
+      leads: bLeads.map((l) => ({
+        id: l.id,
+        label: leadLabel(l),
+        href: `/leads/${l.id}`,
+        sub: l.leadSource ?? format(l.createdAt, "MMM d"),
+      })),
+      appts: bAppts.map((a) => ({
+        id: a.id,
+        label: leadLabel(a.lead),
+        href: `/leads/${a.lead.id}`,
+        sub: `${a.title} · ${format(a.scheduledAt, "MMM d")}${a.status === "COMPLETED" ? " · done" : ""}`,
+      })),
+      proposals: bSent.map((p) => ({
+        id: p.id,
+        label: leadLabel(p.lead),
+        href: `/proposals/${p.id}`,
+        sub: p.title,
+      })),
+      deals: bWon.map((p) => ({
+        id: p.id,
+        label: leadLabel(p.lead),
+        href: `/sales/${p.id}`,
+        sub: `${p.title} · ${lineItemsTotal(p.lineItems).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}`,
+      })),
+    };
+
+    return {
+      label: b.label,
+      startKey,
+      newLeads: bLeads.length,
+      apptsBooked: bAppts.length,
+      apptsCompleted: bAppts.filter((a) => a.status === "COMPLETED").length,
+      proposalsSent: bSent.length,
+      dealsWon: bWon.length,
+      wonValue: bWon.reduce((s, p) => s + lineItemsTotal(p.lineItems), 0),
+      detail,
+      targets: targetByKey.get(startKey) ?? null,
+    };
+  });
+}
+
+/** Upsert one period's targets (null clears a metric). */
+export async function saveSalesTarget(
+  granularity: Period,
+  startKey: string, // "YYYY-MM-DD"
+  values: TargetSet,
+) {
+  const periodStart = new Date(`${startKey}T00:00:00Z`);
+  await prisma.salesTarget.upsert({
+    where: { granularity_periodStart: { granularity, periodStart } },
+    update: values,
+    create: { granularity, periodStart, ...values },
+  });
+  return { ok: true as const };
 }

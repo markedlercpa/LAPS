@@ -1,11 +1,12 @@
 "use client";
 
 import type { DeliveryStatus } from "@prisma/client";
-import { DataTable, type Column } from "@/components/data-table";
+import { DataTable, distinctOptions, type Column, type FilterDef } from "@/components/data-table";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 export type SalesRow = {
   id: string;
+  contractId: string | null;
   client: string;
   value: number;
   wonAt: string | null;
@@ -28,6 +29,13 @@ const STATUS_LABEL: Record<DeliveryStatus, string> = {
 
 export function SalesTable({ rows }: { rows: SalesRow[] }) {
   const columns: Column<SalesRow>[] = [
+    {
+      key: "contractId",
+      header: "Contract",
+      sortable: true,
+      className: "whitespace-nowrap",
+      render: (r) => <span className="font-mono text-[12px] text-muted">{r.contractId ?? "—"}</span>,
+    },
     { key: "client", header: "Client", sortable: true, render: (r) => <span className="font-heading font-extrabold">{r.client}</span> },
     {
       key: "value",
@@ -52,11 +60,23 @@ export function SalesTable({ rows }: { rows: SalesRow[] }) {
     { key: "progress", header: "Onboarding", numeric: true, render: (r) => <span className="text-muted">{r.progress}</span> },
   ];
 
+  const filters: FilterDef<SalesRow>[] = [
+    {
+      key: "deliveryStatus",
+      label: "Delivery",
+      getValue: (r) => r.deliveryStatus,
+      options: (Object.keys(STATUS_LABEL) as DeliveryStatus[]).map((s) => ({ value: s, label: STATUS_LABEL[s] })),
+    },
+    { key: "owner", label: "Owner", getValue: (r) => r.ownerName, options: distinctOptions(rows, (r) => r.ownerName) },
+  ];
+
   return (
     <DataTable
       columns={columns}
       data={rows}
-      searchKeys={["client"]}
+      searchKeys={["client", "contractId"]}
+      filters={filters}
+      rowHref={(r) => `/sales/${r.id}`}
       emptyMessage="No closed-won deals yet."
       searchPlaceholder="Search clients"
     />

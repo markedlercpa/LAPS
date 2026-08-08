@@ -63,9 +63,10 @@ export async function markProposalWon(proposalId: string, signer?: Signer) {
     return { ok: true as const };
   }
 
+  const contractId = proposal.contractId ?? (await nextContractId(now));
   await prisma.proposal.update({
     where: { id: proposalId },
-    data: { status: "WON", wonAt: proposal.wonAt ?? now, ...signerData },
+    data: { status: "WON", wonAt: proposal.wonAt ?? now, contractId, ...signerData },
   });
 
   await prisma.lead.update({
@@ -97,6 +98,23 @@ export async function markProposalWon(proposalId: string, signer?: Signer) {
   }
 
   return { ok: true as const };
+}
+
+/**
+ * Sequential contract id for a won deal, e.g. "EZ-2026-004". Numbered per
+ * calendar year across all assigned contract ids; retries on the rare unique
+ * collision from a concurrent win.
+ */
+async function nextContractId(now: Date): Promise<string> {
+  const year = now.getUTCFullYear();
+  const prefix = `EZ-${year}-`;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const count = await prisma.proposal.count({ where: { contractId: { startsWith: prefix } } });
+    const candidate = `${prefix}${String(count + 1 + attempt).padStart(3, "0")}`;
+    const clash = await prisma.proposal.findUnique({ where: { contractId: candidate }, select: { id: true } });
+    if (!clash) return candidate;
+  }
+  return `${prefix}${Date.now().toString().slice(-6)}`;
 }
 
 /**

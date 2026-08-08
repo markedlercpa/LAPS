@@ -317,6 +317,44 @@ function baseUrl(): string {
   ).replace(/\/$/, "");
 }
 
+/**
+ * Social-proof block appended to booking emails (confirmation + reminder) so a
+ * prospect keeps seeing our results before the call. Mirrors the proposal
+ * page's proof. Best-effort — returns "" if the brochure can't be loaded.
+ */
+async function proofEmailHtml(): Promise<string> {
+  try {
+    const { getBrochure } = await import("@/lib/brochure");
+    const b = await getBrochure();
+    const stats = b.stats
+      .slice(0, 4)
+      .map(
+        (s) =>
+          `<td style="padding:0 14px 0 0;vertical-align:top"><div style="font-size:20px;font-weight:800;color:#201e1d">${s.value}</div><div style="font-size:11px;color:#6b6b6b">${s.label}</div></td>`,
+      )
+      .join("");
+    const cases = b.caseStudies
+      .slice(0, 2)
+      .map(
+        (c) =>
+          `<p style="margin:6px 0"><strong>${c.result}</strong> — <span style="color:#6b6b6b">${c.title}</span></p>`,
+      )
+      .join("");
+    const testimonial = b.testimonials[0]
+      ? `<blockquote style="margin:12px 0 0;padding-left:12px;border-left:3px solid #201e1d;font-style:italic;color:#4a4a4a">“${b.testimonials[0].quote}” — ${b.testimonials[0].author}, ${b.testimonials[0].role}</blockquote>`
+      : "";
+    return `
+      <div style="margin-top:22px;padding-top:16px;border-top:1px solid #ddd;font-family:Arial,sans-serif">
+        <div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#6b6b6b">A bit about our results</div>
+        <table style="margin-top:10px"><tr>${stats}</tr></table>
+        <div style="margin-top:12px;font-size:14px">${cases}</div>
+        ${testimonial}
+      </div>`;
+  } catch {
+    return "";
+  }
+}
+
 /** Create a booking from the public page: match/create lead, book, notify. */
 export async function createBooking(input: {
   eventTypeId: string;
@@ -455,15 +493,16 @@ export async function sendConfirmationEmails(appointmentId: string): Promise<voi
   const hostName = host.displayName || host.user?.name || "our team";
   const b = baseUrl();
 
-  const html = confirmationHtml({
-    inviteeName: appt.inviteeName || "there",
-    eventName: appt.eventType.name,
-    hostName,
-    whenLabel,
-    location: appt.meetingUrl,
-    rescheduleUrl: `${b}/book/${host.slug}/${appt.eventType.slug}?reschedule=${appt.rescheduleToken}`,
-    cancelUrl: `${b}/book/cancel/${appt.cancelToken}`,
-  });
+  const html =
+    confirmationHtml({
+      inviteeName: appt.inviteeName || "there",
+      eventName: appt.eventType.name,
+      hostName,
+      whenLabel,
+      location: appt.meetingUrl,
+      rescheduleUrl: `${b}/book/${host.slug}/${appt.eventType.slug}?reschedule=${appt.rescheduleToken}`,
+      cancelUrl: `${b}/book/cancel/${appt.cancelToken}`,
+    }) + (await proofEmailHtml());
 
   await sendMailAsUser({
     userId: host.userId,
@@ -520,7 +559,7 @@ export async function sendDueReminders(withinHours = 24): Promise<number> {
         ${appt.meetingUrl ? `<p><strong>Where:</strong> <a href="${appt.meetingUrl}">${appt.meetingUrl}</a></p>` : ""}
         <p><a href="${b}/book/${host.slug}/${appt.eventType.slug}?reschedule=${appt.rescheduleToken}">Reschedule</a> ·
         <a href="${b}/book/cancel/${appt.cancelToken}">Cancel</a></p>
-      </div>`,
+      </div>${await proofEmailHtml()}`,
     });
     if (res.ok) {
       await prisma.appointment.update({ where: { id: appt.id }, data: { reminderSentAt: new Date() } });

@@ -1,8 +1,9 @@
 "use client";
 
 import type { ProposalStatus } from "@prisma/client";
-import { DataTable, type Column } from "@/components/data-table";
+import { DataTable, distinctOptions, type Column, type FilterDef } from "@/components/data-table";
 import { ProposalStatusBadge } from "@/components/status-badge";
+import { PROPOSAL_STATUS_LABELS } from "@/lib/constants";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 export type ProposalRow = {
@@ -62,11 +63,25 @@ export function ProposalsTable({
     },
   ];
 
+  const filters: FilterDef<ProposalRow>[] = [
+    {
+      key: "status",
+      label: "Status",
+      getValue: (r) => r.status,
+      options: distinctOptions(rows, (r) => r.status).map((o) => ({
+        value: o.value,
+        label: PROPOSAL_STATUS_LABELS[o.value as ProposalStatus] ?? o.value,
+      })),
+    },
+    { key: "owner", label: "Owner", getValue: (r) => r.ownerName, options: distinctOptions(rows, (r) => r.ownerName) },
+  ];
+
   return (
     <DataTable
       columns={columns}
       data={rows}
       searchKeys={["title", "leadName"]}
+      filters={filters}
       rowHref={(r) => `/proposals/${r.id}`}
       emptyMessage={emptyMessage ?? "No proposals yet."}
       searchPlaceholder="Search proposals"

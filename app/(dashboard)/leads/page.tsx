@@ -35,6 +35,8 @@ export default async function LeadsPage({
     stage: l.stage,
     ownerName: ownerName(l.owner),
     trustScore: l.trustScore,
+    revenueEstimate: l.revenueEstimate != null ? Number(l.revenueEstimate) : null,
+    headcountEstimate: l.headcountEstimate,
     createdAt: l.createdAt.toISOString(),
   }));
 
@@ -71,7 +73,7 @@ export default async function LeadsPage({
     <div>
       <PageHeader
         eyebrow="01 — L"
-        title="Lead Generation"
+        title="Leads"
         description="All leads and their interaction history."
       >
         <NewLeadButton />

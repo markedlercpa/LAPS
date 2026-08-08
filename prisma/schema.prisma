@@ -36,6 +36,7 @@ model User {
   leads        Lead[]        @relation("LeadOwner")
   appointments Appointment[] @relation("AppointmentOwner")
   proposals    Proposal[]    @relation("ProposalOwner")
+  prospects    Prospect[]    @relation("ProspectOwner")
   activities   Activity[]
   actionItems  ActionItem[]  @relation("ActionItemAssignee")
   bookingHost  BookingHost?
@@ -102,6 +103,9 @@ model Lead {
   lostReason  String?
   notes       String?  @db.Text
   trustScore  Int      @default(0)
+  // Company sizing estimates (manual or imported), for qualification + filters.
+  revenueEstimate   Decimal? @db.Decimal(14, 2)
+  headcountEstimate Int?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -265,6 +269,7 @@ model RateCardLevel {
 model Proposal {
   id                    String         @id @default(cuid())
   hubspotId             String?        @unique
+  contractId            String?        @unique // e.g. "EZ-2026-004", assigned when won
   leadId                String
   ownerId               String?
   title                 String
@@ -462,6 +467,60 @@ model ChecklistItem {
   handoff Handoff @relation(fields: [handoffId], references: [id], onDelete: Cascade)
 
   @@index([handoffId])
+}
+
+enum ProspectStatus {
+  COLD
+  QUEUED
+  IN_SEQUENCE
+  ENGAGED
+  PROMOTED
+  DISQUALIFIED
+}
+
+/// Account-based-marketing prospect list (Dream 100). Cold accounts imported
+/// manually, worked through the warming sequence, and promoted into Leads when
+/// they engage. Kept separate from Lead so the pipeline stays clean.
+model Prospect {
+  id                String         @id @default(cuid())
+  companyName       String
+  contactName       String?
+  title             String?
+  email             String?
+  phone             String?
+  website           String?
+  industry          String?
+  revenueEstimate   Decimal?       @db.Decimal(14, 2)
+  headcountEstimate Int?
+  tier              String         @default("B") // Dream 100 tier: A | B | C
+  status            ProspectStatus @default(COLD)
+  source            String? // list / import batch name
+  notes             String?        @db.Text
+  ownerId           String?
+  promotedLeadId    String?        @unique
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  owner User? @relation("ProspectOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([tier])
+}
+
+/// Per-period sales targets shown against actuals on the reporting page.
+/// One row per (granularity, period start); null metric = no target set.
+model SalesTarget {
+  id            String   @id @default(cuid())
+  granularity   String // week | month | quarter
+  periodStart   DateTime @db.Date
+  leads         Int?
+  apptsBooked   Int?
+  proposalsSent Int?
+  dealsWon      Int?
+  wonValue      Decimal? @db.Decimal(14, 2)
+  updatedAt     DateTime @updatedAt
+
+  @@unique([granularity, periodStart])
 }
 
 // ============================================================================

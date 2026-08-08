@@ -28,6 +28,7 @@ import {
   Table2,
   Scale,
   FileBarChart,
+  Crosshair,
   LogOut,
   type LucideIcon,
 } from "lucide-react";
@@ -74,7 +75,8 @@ const MODULES: Module[] = [
     icon: Activity,
     items: [
       { href: "/pipeline", label: "Pipeline", icon: Activity },
-      { href: "/leads", label: "Lead Generation", icon: Users },
+      { href: "/leads", label: "Leads", icon: Users },
+      { href: "/prospecting", label: "Prospecting", icon: Crosshair },
       { href: "/appointments", label: "Appointments", icon: Calendar },
       { href: "/proposals", label: "Proposals", icon: FileText },
       { href: "/sales", label: "Sales Closed", icon: Trophy },

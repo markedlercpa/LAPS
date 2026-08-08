@@ -1,15 +1,28 @@
 import { PageHeader } from "@/components/page-header";
 import { MetricRow } from "@/components/metric-row";
 import { MicroLabel } from "@/components/micro-label";
+import { SegToggle } from "@/components/ui/seg";
 import { Funnel } from "@/components/reporting/funnel";
 import { RepTable } from "@/components/reporting/rep-table";
-import { getPipelineOverview, getRepReport } from "@/lib/reporting";
+import { getPipelineOverview, getRepReport, PIPELINE_WINDOWS } from "@/lib/reporting";
 import { formatCurrency } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-export default async function PipelinePage() {
-  const [overview, reps] = await Promise.all([getPipelineOverview(), getRepReport()]);
+export default async function PipelinePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ window?: string }>;
+}) {
+  const sp = await searchParams;
+  const windowDays = PIPELINE_WINDOWS.includes(Number(sp.window) as (typeof PIPELINE_WINDOWS)[number])
+    ? Number(sp.window)
+    : 90;
+  const [overview, reps] = await Promise.all([
+    getPipelineOverview(windowDays),
+    getRepReport(windowDays),
+  ]);
+  const windowLabel = windowDays >= 365 ? "12 mo" : `${windowDays}d`;
 
   return (
     <div>
@@ -17,7 +30,16 @@ export default async function PipelinePage() {
         eyebrow="00 — Overview"
         title="Pipeline"
         description="The Sales funnel end to end, with conversion between each stage."
-      />
+      >
+        <SegToggle
+          param="window"
+          defaultValue="90"
+          options={PIPELINE_WINDOWS.map((d) => ({
+            value: String(d),
+            label: d >= 365 ? "12 mo" : `${d}d`,
+          }))}
+        />
+      </PageHeader>
 
       <MetricRow
         metrics={[
@@ -27,7 +49,7 @@ export default async function PipelinePage() {
             note: `${overview.openCount} live proposals`,
           },
           {
-            label: "Closed won · 90d",
+            label: `Closed won · ${windowLabel}`,
             value: formatCurrency(overview.wonValue90d),
             note: `${overview.wonCount90d} deals`,
             accent: true,

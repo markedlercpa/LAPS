@@ -20,7 +20,17 @@ const leadSchema = z.object({
   email: z.string().email().optional().or(z.literal("")),
   phone: z.string().optional(),
   notes: z.string().optional(),
+  revenueEstimate: z.coerce.number().nonnegative().optional().or(z.nan().transform(() => undefined)),
+  headcountEstimate: z.coerce.number().int().nonnegative().optional().or(z.nan().transform(() => undefined)),
 });
+
+/** Empty string / NaN → null so blank estimate fields clear rather than error. */
+function estimates(d: { revenueEstimate?: number; headcountEstimate?: number }) {
+  return {
+    revenueEstimate: d.revenueEstimate == null || Number.isNaN(d.revenueEstimate) ? null : d.revenueEstimate,
+    headcountEstimate: d.headcountEstimate == null || Number.isNaN(d.headcountEstimate) ? null : d.headcountEstimate,
+  };
+}
 
 export async function createLead(input: unknown) {
   const parsed = leadSchema.safeParse(input);
@@ -28,10 +38,12 @@ export async function createLead(input: unknown) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const userId = await currentUserId();
+  const { revenueEstimate, headcountEstimate, ...rest } = parsed.data;
   const lead = await prisma.lead.create({
     data: {
-      ...parsed.data,
+      ...rest,
       email: parsed.data.email || null,
+      ...estimates({ revenueEstimate, headcountEstimate }),
       ownerId: userId,
     },
   });
@@ -42,9 +54,10 @@ export async function createLead(input: unknown) {
 export async function updateLead(id: string, input: unknown) {
   const parsed = leadSchema.partial().safeParse(input);
   if (!parsed.success) return { ok: false, error: "Invalid input" };
+  const { revenueEstimate, headcountEstimate, ...rest } = parsed.data;
   await prisma.lead.update({
     where: { id },
-    data: { ...parsed.data, email: parsed.data.email || null },
+    data: { ...rest, email: parsed.data.email || null, ...estimates({ revenueEstimate, headcountEstimate }) },
   });
   revalidatePath(`/leads/${id}`);
   revalidatePath("/leads");

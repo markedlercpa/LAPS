@@ -15,10 +15,32 @@ export type Column<T> = {
   sortValue?: (row: T) => string | number;
 };
 
+/** A toolbar dropdown filter. `getValue` maps a row to the value compared
+ * against the selected option ("" = all rows). */
+export type FilterDef<T> = {
+  key: string;
+  label: string;
+  options: { value: string; label: string }[];
+  getValue: (row: T) => string;
+};
+
+/** Build filter options from the distinct values present in the data. */
+export function distinctOptions<T>(rows: T[], getValue: (row: T) => string | null | undefined) {
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const v = getValue(r);
+    if (v) seen.add(v);
+  }
+  return Array.from(seen)
+    .sort((a, b) => a.localeCompare(b))
+    .map((v) => ({ value: v, label: v }));
+}
+
 export function DataTable<T extends { id: string }>({
   columns,
   data,
   searchKeys,
+  filters,
   rowHref,
   emptyMessage = "No records yet.",
   toolbarLeft,
@@ -27,6 +49,7 @@ export function DataTable<T extends { id: string }>({
   columns: Column<T>[];
   data: T[];
   searchKeys?: (keyof T)[];
+  filters?: FilterDef<T>[];
   rowHref?: (row: T) => string;
   emptyMessage?: string;
   toolbarLeft?: React.ReactNode;
@@ -36,6 +59,7 @@ export function DataTable<T extends { id: string }>({
   const [query, setQuery] = React.useState("");
   const [sortKey, setSortKey] = React.useState<string | null>(null);
   const [asc, setAsc] = React.useState(true);
+  const [filterValues, setFilterValues] = React.useState<Record<string, string>>({});
 
   const filtered = React.useMemo(() => {
     let rows = data;
@@ -44,6 +68,10 @@ export function DataTable<T extends { id: string }>({
       rows = rows.filter((r) =>
         searchKeys.some((k) => String(r[k] ?? "").toLowerCase().includes(q)),
       );
+    }
+    for (const f of filters ?? []) {
+      const sel = filterValues[f.key];
+      if (sel) rows = rows.filter((r) => f.getValue(r) === sel);
     }
     if (sortKey) {
       const col = columns.find((c) => c.key === sortKey);
@@ -57,7 +85,7 @@ export function DataTable<T extends { id: string }>({
       });
     }
     return rows;
-  }, [data, query, searchKeys, sortKey, asc, columns]);
+  }, [data, query, searchKeys, filters, filterValues, sortKey, asc, columns]);
 
   const toggleSort = (key: string) => {
     if (sortKey === key) setAsc((v) => !v);
@@ -67,13 +95,30 @@ export function DataTable<T extends { id: string }>({
     }
   };
 
-  const showToolbar = Boolean(toolbarLeft) || Boolean(searchKeys?.length);
+  const showToolbar = Boolean(toolbarLeft) || Boolean(searchKeys?.length) || Boolean(filters?.length);
 
   return (
     <div className="space-y-4">
       {showToolbar && (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>{toolbarLeft}</div>
+          <div className="flex flex-wrap items-center gap-2">
+            {toolbarLeft}
+            {filters?.map((f) => (
+              <label key={f.key} className="flex items-center gap-1.5">
+                <span className="micro-label">{f.label}</span>
+                <select
+                  className="input py-1.5 text-[13px]"
+                  value={filterValues[f.key] ?? ""}
+                  onChange={(e) => setFilterValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                >
+                  <option value="">All</option>
+                  {f.options.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
           {searchKeys?.length ? (
             <div className="relative w-[300px] max-w-full">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600" />

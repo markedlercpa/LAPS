@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { computeSlots, loadEventForSlots } from "@/lib/booking";
+import { getBrochure } from "@/lib/brochure";
 import { BookingFlow, type Question } from "@/components/booking/booking-flow";
+import { SocialProof } from "@/components/booking/social-proof";
 
 export const dynamic = "force-dynamic";
 
@@ -60,20 +62,27 @@ export default async function BookEventPage({
     ? (event.questions as Question[])
     : [];
 
+  const brochure = await getBrochure();
+
   return (
-    <BookingFlow
-      hostSlug={host.slug}
-      hostName={host.displayName || host.user?.name || "Booking"}
-      hostTimezone={host.timezone}
-      eventTypeId={event.id}
-      eventName={event.name}
-      eventDescription={event.description}
-      durationMin={event.durationMin}
-      locationType={event.locationType}
-      slots={slots}
-      questions={questions}
-      rescheduleToken={rescheduleToken}
-      existingWhenISO={existingWhenISO}
-    />
+    <div>
+      <BookingFlow
+        hostSlug={host.slug}
+        hostName={host.displayName || host.user?.name || "Booking"}
+        hostTimezone={host.timezone}
+        eventTypeId={event.id}
+        eventName={event.name}
+        eventDescription={event.description}
+        durationMin={event.durationMin}
+        locationType={event.locationType}
+        slots={slots}
+        questions={questions}
+        rescheduleToken={rescheduleToken}
+        existingWhenISO={existingWhenISO}
+      />
+      <div className="mx-auto max-w-xl px-5 pb-16">
+        <SocialProof brochure={brochure} />
+      </div>
+    </div>
   );
 }

@@ -1,9 +1,10 @@
 "use client";
 
 import type { Stage } from "@prisma/client";
-import { DataTable, type Column } from "@/components/data-table";
+import { DataTable, distinctOptions, type Column, type FilterDef } from "@/components/data-table";
 import { StageBadge } from "@/components/status-badge";
 import { TrustBadge } from "@/components/leads/trust-badge";
+import { STAGE_LABELS } from "@/lib/constants";
 import { formatDate } from "@/lib/utils";
 
 export type LeadRow = {
@@ -17,8 +18,16 @@ export type LeadRow = {
   stage: Stage;
   ownerName: string;
   trustScore: number;
+  revenueEstimate: number | null;
+  headcountEstimate: number | null;
   createdAt: string;
 };
+
+function compactUsd(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (n >= 1_000) return `$${Math.round(n / 1_000)}k`;
+  return `$${n}`;
+}
 
 export function LeadsTable({
   rows,
@@ -41,8 +50,23 @@ export function LeadsTable({
       ),
     },
     { key: "companyName", header: "Company", sortable: true, render: (r) => r.companyName || "—" },
+    {
+      key: "revenueEstimate",
+      header: "Est. rev",
+      sortable: true,
+      numeric: true,
+      sortValue: (r) => r.revenueEstimate ?? -1,
+      render: (r) => <span className="text-muted">{r.revenueEstimate != null ? compactUsd(r.revenueEstimate) : "—"}</span>,
+    },
+    {
+      key: "headcountEstimate",
+      header: "Headcount",
+      sortable: true,
+      numeric: true,
+      sortValue: (r) => r.headcountEstimate ?? -1,
+      render: (r) => <span className="text-muted">{r.headcountEstimate ?? "—"}</span>,
+    },
     { key: "leadSource", header: "Source", render: (r) => <span className="text-muted">{r.leadSource || "—"}</span> },
-    { key: "email", header: "Email", render: (r) => <span className="text-muted">{r.email || "—"}</span> },
     { key: "ownerName", header: "Owner", sortable: true, render: (r) => <span className="text-muted">{r.ownerName}</span> },
     { key: "stage", header: "Stage", render: (r) => <StageBadge stage={r.stage} /> },
     {
@@ -62,11 +86,23 @@ export function LeadsTable({
     },
   ];
 
+  const filters: FilterDef<LeadRow>[] = [
+    {
+      key: "stage",
+      label: "Stage",
+      getValue: (r) => r.stage,
+      options: Object.entries(STAGE_LABELS).map(([value, label]) => ({ value, label: label as string })),
+    },
+    { key: "owner", label: "Owner", getValue: (r) => r.ownerName, options: distinctOptions(rows, (r) => r.ownerName) },
+    { key: "source", label: "Source", getValue: (r) => r.leadSource ?? "", options: distinctOptions(rows, (r) => r.leadSource) },
+  ];
+
   return (
     <DataTable
       columns={columns}
       data={rows}
       searchKeys={["firstName", "lastName", "companyName", "email", "leadSource"]}
+      filters={filters}
       rowHref={(r) => `/leads/${r.id}`}
       emptyMessage="No leads yet. Add your first lead to get started."
       toolbarLeft={toolbarLeft}
