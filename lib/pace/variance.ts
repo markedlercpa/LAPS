@@ -18,7 +18,8 @@ export type Basis = "month" | "qtd" | "ytd";
 export const MATERIAL_DOLLARS = 5000;
 export const MATERIAL_PCT = 0.1;
 
-const IS_SECTIONS: QboSection[] = ["Revenue", "OtherIncome", "COGS", "OpEx", "OtherExpense"];
+// QBO P&L order: Income → COGS → Expenses → Other Income → Other Expense.
+const IS_SECTIONS: QboSection[] = ["Revenue", "COGS", "OpEx", "OtherIncome", "OtherExpense"];
 const BS_SECTIONS: QboSection[] = ["Asset", "Liability", "Equity"];
 const REVENUE_SECTIONS = new Set<QboSection>(["Revenue", "OtherIncome"]);
 

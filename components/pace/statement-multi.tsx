@@ -44,19 +44,37 @@ export function StatementMulti({
           { label: "A − (L+E)", value: formatCurrency(s.checkDiff?.[firstCol] ?? 0), accent: Math.abs(s.checkDiff?.[firstCol] ?? 0) > 0.5 },
         ];
 
-  // Grand-total rows to render under the table, per statement.
-  const totalRows: { label: string; values: number[]; strong?: boolean }[] =
+  type SubRow = { label: string; values: number[]; strong?: boolean };
+  // QBO interleaves running subtotals into the statement: Gross Profit right
+  // after COGS, Net Operating Income after Expenses. Keyed by the section they
+  // follow so they render inline in QBO order.
+  const interleaved: Record<string, SubRow[]> =
     data.statement === "IS"
-      ? [
-          { label: "Gross Profit", values: s.grossProfit ?? [], strong: true },
-          { label: "Operating Income", values: s.operatingIncome ?? [] },
-          { label: "Net Income", values: s.netIncome ?? [], strong: true },
-        ]
+      ? {
+          COGS: [{ label: "Gross Profit", values: s.grossProfit ?? [], strong: true }],
+          OpEx: [{ label: "Net Operating Income", values: s.operatingIncome ?? [] }],
+        }
+      : {};
+
+  // Grand-total rows under the table (after every section), per statement.
+  const totalRows: SubRow[] =
+    data.statement === "IS"
+      ? [{ label: "Net Income", values: s.netIncome ?? [], strong: true }]
       : [
           { label: "Total Assets", values: s.assets ?? [], strong: true },
           { label: "Total Liabilities", values: s.liabilities ?? [] },
           { label: "Total Equity", values: s.equity ?? [] },
         ];
+
+  const emitted = new Set<string>();
+  const renderSub = (r: SubRow) => (
+    <tr key={r.label} className={r.strong ? "border-t-2 border-divider" : ""}>
+      <td className={r.strong ? "font-heading font-extrabold" : "font-heading"}>{r.label}</td>
+      {r.values.map((v, ci) => (
+        <td key={ci} className={cn("num", r.strong && "font-heading font-extrabold")}>{fmt(v, data.columns[ci].key)}</td>
+      ))}
+    </tr>
+  );
 
   return (
     <div>
@@ -112,19 +130,18 @@ export function StatementMulti({
                       ))}
                     </tr>
                   )}
+                  {(interleaved[g.section] ?? []).map((r) => {
+                    emitted.add(r.label);
+                    return renderSub(r);
+                  })}
                 </Fragment>
               );
             })}
 
             <tr><td colSpan={data.columns.length + 1} className="py-1"></td></tr>
-            {totalRows.map((r) => (
-              <tr key={r.label} className={r.strong ? "border-t-2 border-divider" : ""}>
-                <td className={r.strong ? "font-heading font-extrabold" : "font-heading"}>{r.label}</td>
-                {r.values.map((v, ci) => (
-                  <td key={ci} className={cn("num", r.strong && "font-heading font-extrabold")}>{fmt(v, data.columns[ci].key)}</td>
-                ))}
-              </tr>
-            ))}
+            {/* Any interleaved subtotal whose anchor section was absent, then the grand totals. */}
+            {Object.values(interleaved).flat().filter((r) => !emitted.has(r.label)).map(renderSub)}
+            {totalRows.map(renderSub)}
           </tbody>
         </table>
       </div>

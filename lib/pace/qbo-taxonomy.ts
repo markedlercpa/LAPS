@@ -52,10 +52,12 @@ export const SECTION_LABELS: Record<QboSection, string> = {
  */
 const BY_ACCOUNT_TYPE: Record<string, SectionDef> = {
   // ── Income statement ──
+  // Order mirrors a QBO P&L: Income → COGS → (Gross Profit) → Expenses →
+  // (Net Operating Income) → Other Income → Other Expense → (Net Income).
   Income: { statement: "IS", section: "Revenue", naturalSide: "CREDIT", sortOrder: 10, varianceType: "Revenue" },
-  "Other Income": { statement: "IS", section: "OtherIncome", naturalSide: "CREDIT", sortOrder: 15, varianceType: "Revenue" },
   "Cost of Goods Sold": { statement: "IS", section: "COGS", naturalSide: "DEBIT", sortOrder: 20, varianceType: "COGS" },
   Expense: { statement: "IS", section: "OpEx", naturalSide: "DEBIT", sortOrder: 30, varianceType: "OpEx" },
+  "Other Income": { statement: "IS", section: "OtherIncome", naturalSide: "CREDIT", sortOrder: 35, varianceType: "Revenue" },
   "Other Expense": { statement: "IS", section: "OtherExpense", naturalSide: "DEBIT", sortOrder: 40, varianceType: "OtherExpense" },
   // ── Balance sheet ──
   Bank: { statement: "BS", section: "Asset", naturalSide: "DEBIT", sortOrder: 100, varianceType: "Asset" },
