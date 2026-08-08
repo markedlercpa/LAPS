@@ -745,6 +745,90 @@ export function pullApAging(entityId: string): Promise<AgingItem[] | null> {
   return pullAgingReport(entityId, "AgedPayableDetail");
 }
 
+// ── Incremental sync via ChangeDataCapture ──────────────────────────────────
+/**
+ * The GL-posting transaction entities we watch for changes. A change to any of
+ * these shifts the trial balance / general ledger for the month it's dated in,
+ * so its month must be re-pulled.
+ */
+const CDC_ENTITIES = [
+  "Invoice", "CreditMemo", "Payment", "SalesReceipt", "RefundReceipt",
+  "Bill", "BillPayment", "VendorCredit", "Purchase", "Deposit", "Transfer", "JournalEntry",
+] as const;
+
+/** CDC's changedSince can look back at most 30 days; stay safely inside that. */
+export const CDC_MAX_LOOKBACK_DAYS = 28;
+
+export type ChangedMonths = {
+  months: string[]; // first-of-month ISO ("YYYY-MM-01") of every changed txn we could date
+  deletedIds: string[]; // ids of deleted txns CDC returned without a usable date (resolve against our GL)
+  changeCount: number;
+};
+
+function firstOfMonthISO(dateStr: string): string | null {
+  const m = /^(\d{4})-(\d{2})/.exec(dateStr);
+  return m ? `${m[1]}-${m[2]}-01` : null;
+}
+
+/**
+ * Ask QBO which posting transactions changed since `sinceISO`, and reduce that
+ * to the set of affected months (plus any deleted-txn ids we couldn't date).
+ * The caller re-pulls the TB/GL *reports* for those months — CDC is only the
+ * change-detector, so QBO stays the source of truth for the balances.
+ *
+ * Returns null on a hard failure (not connected / request failed) so the caller
+ * can fall back to a full sync. `sinceISO` must be within CDC_MAX_LOOKBACK_DAYS.
+ */
+export async function pullChangedMonths(entityId: string, sinceISO: string): Promise<ChangedMonths | null> {
+  const auth = await getAccessToken(entityId);
+  if (!auth) return null;
+
+  const url = `${apiBase()}/v3/company/${auth.realmId}/cdc?entities=${CDC_ENTITIES.join(",")}&changedSince=${encodeURIComponent(sinceISO)}&minorversion=70`;
+  try {
+    const res = await fetchWithRetry(url, { headers: { Authorization: `Bearer ${auth.token}`, Accept: "application/json" } });
+    if (res.status === 401) {
+      await markNeedsReconnect(entityId);
+      return null;
+    }
+    if (!res.ok) {
+      console.error("QBO CDC failed:", res.status, (await res.text()).slice(0, 300));
+      return null;
+    }
+    const json = (await res.json()) as {
+      CDCResponse?: Array<{ QueryResponse?: Array<Record<string, unknown>> }>;
+    };
+
+    const months = new Set<string>();
+    const deletedIds: string[] = [];
+    let changeCount = 0;
+
+    for (const cdc of json.CDCResponse ?? []) {
+      for (const qr of cdc.QueryResponse ?? []) {
+        for (const key of Object.keys(qr)) {
+          const val = qr[key];
+          if (!Array.isArray(val)) continue; // skip startPosition/maxResults scalars
+          for (const raw of val) {
+            const txn = raw as { TxnDate?: string; status?: string; Id?: string };
+            changeCount += 1;
+            const iso = txn.TxnDate ? firstOfMonthISO(txn.TxnDate) : null;
+            if (iso) {
+              months.add(iso);
+            } else if ((txn.status ?? "").toLowerCase() === "deleted" && txn.Id) {
+              // Deleted stubs often omit TxnDate — resolve the month from our own GL.
+              deletedIds.push(txn.Id);
+            }
+          }
+        }
+      }
+    }
+
+    return { months: [...months], deletedIds, changeCount };
+  } catch (err) {
+    console.error("QBO CDC error:", err);
+    return null;
+  }
+}
+
 // ── QBO report parsing ──────────────────────────────────────────────────────
 type QboColData = { value?: string; id?: string };
 type QboRow = { type?: string; ColData?: QboColData[]; Rows?: { Row?: QboRow[] } };

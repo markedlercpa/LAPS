@@ -1,16 +1,18 @@
 import { prisma } from "@/lib/prisma";
-import { qboConfigured, pullTrialBalance, pullGeneralLedger, syncLedgerAccounts } from "@/lib/pace/qbo";
-import { importTrialBalance } from "@/lib/pace/import";
-import { importGeneralLedger } from "@/lib/pace/gl";
+import { qboConfigured } from "@/lib/pace/qbo";
+import { syncEntityActuals } from "@/lib/pace/sync";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
- * Nightly Finance sync — pull the current + prior month trial balance from QBO for
- * every connected entity. CRON_SECRET-guarded (same convention as
- * booking-reminders). No-op (ok:true, synced:0) when QBO is unconfigured or no
- * entity is connected, so the job is safe to schedule before QBO is wired.
+ * Nightly Finance sync — incremental QBO pull for every connected entity via the
+ * shared `syncEntityActuals` (ChangeDataCapture: only the months whose
+ * transactions changed since the last sync, plus the current month; full
+ * backfill on the first run or after the CDC window lapses). CRON_SECRET-guarded
+ * (same convention as booking-reminders). No-op (ok:true, synced:0) when QBO is
+ * unconfigured or no entity is connected, so the job is safe to schedule before
+ * QBO is wired.
  */
 async function handle(req: Request): Promise<Response> {
   const secret = process.env.CRON_SECRET;
@@ -26,34 +28,20 @@ async function handle(req: Request): Promise<Response> {
     select: { entityId: true },
   });
 
-  const now = new Date();
-  const thisMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const priorMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
-  const months = [priorMonth, thisMonth].map((d) => d.toISOString().slice(0, 10));
-
   let synced = 0;
   let glLines = 0;
   const errors: string[] = [];
   for (const c of connected) {
-    // Refresh the chart of accounts (numbers + QBO descriptive metadata) once per entity.
-    await syncLedgerAccounts(c.entityId).catch(() => null);
-    for (const month of months) {
-      try {
-        const rows = await pullTrialBalance(c.entityId, month);
-        if (!rows) continue;
-        await importTrialBalance({ entityId: c.entityId, periodMonth: month, rows, source: "qbo" });
-        synced += 1;
-
-        const start = new Date(month);
-        const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
-        const gl = await pullGeneralLedger(c.entityId, month, end).catch(() => null);
-        if (gl && gl.length) {
-          const res = await importGeneralLedger({ entityId: c.entityId, periodMonthISO: month, lines: gl }).catch(() => null);
-          if (res) glLines += res.count;
-        }
-      } catch (err) {
-        errors.push(`${c.entityId}/${month}: ${err instanceof Error ? err.message : "failed"}`);
+    try {
+      const res = await syncEntityActuals(c.entityId);
+      if (res.ok) {
+        synced += res.imported;
+        glLines += res.glLines;
+      } else {
+        errors.push(`${c.entityId}: ${res.error}`);
       }
+    } catch (err) {
+      errors.push(`${c.entityId}: ${err instanceof Error ? err.message : "failed"}`);
     }
   }
   return Response.json({ ok: true, synced, glLines, entities: connected.length, errors });

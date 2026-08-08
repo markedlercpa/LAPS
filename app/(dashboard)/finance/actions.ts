@@ -5,8 +5,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { importTrialBalance, type TbRow } from "@/lib/pace/import";
-import { qboConfigured, authorizeUrl, pullTrialBalance, pullGeneralLedger, syncLedgerAccounts } from "@/lib/pace/qbo";
-import { importGeneralLedger } from "@/lib/pace/gl";
+import { qboConfigured, authorizeUrl, pullTrialBalance } from "@/lib/pace/qbo";
+import { syncEntityActuals } from "@/lib/pace/sync";
 import { ENTITY_KINDS } from "@/lib/pace-taxonomy";
 
 async function requireUser() {
@@ -127,77 +127,23 @@ export async function triggerQboSync(entityId: string, periodMonth: string) {
   return res;
 }
 
-/** First-of-month ISO strings for the trailing `count` months, oldest → newest. */
-function trailingMonths(count: number): string[] {
-  const now = new Date();
-  const out: string[] = [];
-  for (let i = count - 1; i >= 0; i--) {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
-    out.push(d.toISOString().slice(0, 10));
-  }
-  return out;
-}
-
 /**
- * One-click "bring in all data": pull the trailing N months of trial balances
- * from QBO for an entity (default 24), importing each month that has data. Also
- * syncs the chart of accounts first (numbers + mapping queue). No month needs to
- * be picked — this is what populates the month dropdown in the first place.
+ * QBO actuals sync (interactive). Incremental by default via `syncEntityActuals`
+ * — on a routine refresh it re-pulls only the months whose transactions changed
+ * (ChangeDataCapture) since the last sync, plus the current month; falls back to
+ * a full trailing-N-month backfill on the first sync, when the last sync predates
+ * CDC's ~30-day window, or when `full` is forced. Pass `{ full: true }` to force
+ * a complete re-pull.
  */
-export async function syncQboActualsAction(entityId: string, monthsBack = 24) {
+export async function syncQboActualsAction(entityId: string, monthsBack = 24, opts?: { full?: boolean }) {
   if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
   if (!qboConfigured()) return { ok: false as const, error: "QuickBooks is not configured." };
 
-  await syncLedgerAccounts(entityId).catch(() => null);
-
-  const months = trailingMonths(monthsBack);
-  let imported = 0;
-  let empty = 0;
-  let failed = 0;
-  let glLines = 0;
-  const importedMonths: string[] = [];
-  for (const month of months) {
-    const rows = await pullTrialBalance(entityId, month);
-    if (rows === null) {
-      // null = not connected / pull failed. Bail early on the first month only;
-      // otherwise treat as a transient miss and keep going.
-      if (imported === 0 && empty === 0) {
-        return { ok: false as const, error: "QBO not connected for this entity, or the pull failed." };
-      }
-      failed += 1;
-      continue;
-    }
-    if (rows.length === 0) {
-      empty += 1;
-      continue;
-    }
-    await importTrialBalance({ entityId, periodMonth: month, rows, source: "qbo" });
-    imported += 1;
-    importedMonths.push(month.slice(0, 7));
-
-    // Also pull the transaction-level general ledger for this month (drill-down
-    // + bottoms-up forecasting). Best-effort: a GL miss never fails the TB sync.
-    const monthStart = new Date(month);
-    const monthEnd = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0))
-      .toISOString()
-      .slice(0, 10);
-    const gl = await pullGeneralLedger(entityId, month, monthEnd).catch(() => null);
-    if (gl && gl.length) {
-      const res = await importGeneralLedger({ entityId, periodMonthISO: month, lines: gl }).catch(() => null);
-      if (res) glLines += res.count;
-    }
+  const res = await syncEntityActuals(entityId, { monthsBack, full: opts?.full });
+  if (res.ok) {
+    revalidatePath("/finance/actuals");
+    revalidatePath("/finance/review");
+    revalidatePath("/finance/ledger");
   }
-
-  revalidatePath("/finance/actuals");
-  revalidatePath("/finance/review");
-  revalidatePath("/finance/ledger");
-  return {
-    ok: true as const,
-    imported,
-    empty,
-    failed,
-    glLines,
-    firstMonth: importedMonths[0] ?? null,
-    lastMonth: importedMonths[importedMonths.length - 1] ?? null,
-  };
+  return res;
 }
