@@ -1,7 +1,7 @@
 "use client";
 
 import type { StapleStage } from "@prisma/client";
-import { DataTable, type Column } from "@/components/data-table";
+import { DataTable, distinctOptions, type Column, type FilterDef } from "@/components/data-table";
 import { formatDate } from "@/lib/utils";
 
 export type EngagementRow = {
@@ -52,11 +52,18 @@ export function EngagementsTable({ rows }: { rows: EngagementRow[] }) {
     },
   ];
 
+  const filters: FilterDef<EngagementRow>[] = [
+    { key: "serviceLine", label: "Service line", getValue: (r) => r.serviceLine, options: distinctOptions(rows, (r) => r.serviceLine) },
+    { key: "owner", label: "Owner", getValue: (r) => r.owner, options: distinctOptions(rows, (r) => r.owner) },
+    { key: "accepted", label: "Accepted", getValue: (r) => (r.accepted ? "yes" : "no"), options: [{ value: "yes", label: "Accepted" }, { value: "no", label: "Not accepted" }] },
+  ];
+
   return (
     <DataTable
       columns={columns}
       data={rows}
       searchKeys={["client", "serviceLine"]}
+      filters={filters}
       rowHref={(r) => `/work/engagements/${r.id}`}
       emptyMessage="No engagements yet. Won deals land here automatically, or create one manually."
       searchPlaceholder="Search engagements"

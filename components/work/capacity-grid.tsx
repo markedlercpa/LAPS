@@ -36,6 +36,17 @@ function shortWeek(w: string): string {
 export function CapacityGrid({ resources, weeks, cells, bookings, closedWeeks, engagements }: Props) {
   const router = useRouter();
   const [sel, setSel] = useState<{ resourceId: string; isoWeek: string } | null>(null);
+  const [band, setBand] = useState("");
+  const [q, setQ] = useState("");
+
+  const bands = useMemo(() => Array.from(new Set(resources.map((r) => r.band))).sort(), [resources]);
+  const shown = useMemo(
+    () =>
+      resources.filter(
+        (r) => (!band || r.band === band) && (!q || r.name.toLowerCase().includes(q.toLowerCase())),
+      ),
+    [resources, band, q],
+  );
 
   const selResource = resources.find((r) => r.id === sel?.resourceId) ?? null;
   const closedSet = useMemo(() => new Set(closedWeeks), [closedWeeks]);
@@ -44,6 +55,19 @@ export function CapacityGrid({ resources, weeks, cells, bookings, closedWeeks, e
 
   return (
     <>
+      {resources.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-end gap-2">
+          <label className="flex items-center gap-1.5">
+            <span className="micro-label">Band</span>
+            <select className="input py-1.5 text-[13px]" value={band} onChange={(e) => setBand(e.target.value)}>
+              <option value="">All</option>
+              {bands.map((b) => <option key={b} value={b}>{b}</option>)}
+            </select>
+          </label>
+          <input className="input w-[220px] py-1.5 text-[13px]" placeholder="Search resource…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <span className="tag tag-neutral ml-auto">{shown.length} of {resources.length}</span>
+        </div>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-[13px]">
           <thead>
@@ -58,7 +82,7 @@ export function CapacityGrid({ resources, weeks, cells, bookings, closedWeeks, e
             </tr>
           </thead>
           <tbody>
-            {resources.map((r) => (
+            {shown.map((r) => (
               <tr key={r.id} className="border-t border-divider">
                 <td className="sticky left-0 z-10 bg-bg px-3 py-2">
                   <div className="font-heading font-extrabold">{r.name}</div>
@@ -85,7 +109,14 @@ export function CapacityGrid({ resources, weeks, cells, bookings, closedWeeks, e
               </tr>
             ))}
             {resources.length === 0 && (
-              <tr><td className="px-3 py-4 text-muted" colSpan={weeks.length + 1}>No active resources — add some under Resources.</td></tr>
+              <tr><td className="px-3 py-4 text-muted" colSpan={weeks.length + 1}>
+                No active resources yet — the grid fills in once you have pool members. Add them under{" "}
+                <a className="text-accent-700" href="/work/capacity/resources">Resources</a> (or import your Karbon roster there).
+                Then click any cell here to request, confirm, or release bookings.
+              </td></tr>
+            )}
+            {resources.length > 0 && shown.length === 0 && (
+              <tr><td className="px-3 py-4 text-muted" colSpan={weeks.length + 1}>No resources match the filter.</td></tr>
             )}
           </tbody>
         </table>

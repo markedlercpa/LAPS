@@ -21,6 +21,7 @@ export function AddRateButton({ band }: { band: { id: string; name: string } }) 
         loadedRate: fd.get("loadedRate"),
         billRate: fd.get("billRate") || undefined,
         effectiveFrom: fd.get("effectiveFrom"),
+        fiscalYear: fd.get("fiscalYear") || undefined,
         note: fd.get("note") || undefined,
       });
       if (res.ok) {
@@ -47,10 +48,16 @@ export function AddRateButton({ band }: { band: { id: string; name: string } }) 
               <input name="billRate" type="number" min="0" step="1" className="input" />
             </label>
           </div>
-          <label className="field">
-            <span className="micro-label">Effective from</span>
-            <input name="effectiveFrom" type="date" className="input" required />
-          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="field">
+              <span className="micro-label">Effective from</span>
+              <input name="effectiveFrom" type="date" className="input" required />
+            </label>
+            <label className="field">
+              <span className="micro-label">Fiscal year</span>
+              <input name="fiscalYear" type="number" min="2000" max="2100" className="input" placeholder="2026" />
+            </label>
+          </div>
           <label className="field">
             <span className="micro-label">Derivation note (optional, for audit)</span>
             <textarea name="note" className="input" rows={2} placeholder="salary + benefits + taxes + tooling ÷ (cap × 46 × util)" />

@@ -1391,6 +1391,7 @@ model RoleBand {
 model RoleBandRate {
   id             String   @id @default(cuid())
   roleBandId     String
+  fiscalYear     Int? // the fiscal year this standard cost applies to
   loadedRateCents Int
   billRateCents  Int? // optional standard billing rate for realized-rate analysis
   effectiveFrom  DateTime @db.Date
@@ -1429,6 +1430,7 @@ model PoolResource {
 model Portfolio {
   id                          String   @id @default(cuid())
   name                        String
+  fiscalYear                  Int? // tag the book to a fiscal year (multi-year support + filters)
   directorName                String
   directorEmail               String
   directorCostCentsAnnual     Int      @default(0)

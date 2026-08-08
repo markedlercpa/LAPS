@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { LogTimeForm } from "@/components/work/log-time";
+import { LiveTimer } from "@/components/work/live-timer";
 import { DeleteTimeEntryButton } from "@/components/work/delete-time-entry";
 import { listTimeEntries } from "@/lib/work/time";
 
@@ -32,6 +33,12 @@ export default async function TimePage({
         description="Pulse's native timesheet — the actuals source for the Capacity module. Logged hours roll up into each engagement's consumed hours and cost."
       />
 
+      <div className="mb-3">
+        <LiveTimer
+          resources={resources.map((r) => ({ id: r.id, name: r.personName }))}
+          engagements={engagementOptions}
+        />
+      </div>
       <div className="mb-5">
         <LogTimeForm
           resources={resources.map((r) => ({ id: r.id, name: r.personName }))}

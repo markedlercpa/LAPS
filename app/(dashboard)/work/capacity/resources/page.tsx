@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { NewResourceButton } from "@/components/work/new-resource";
+import { ImportResourcesButton } from "@/components/work/import-resources";
 import { listRoleBands } from "@/lib/work/capacity";
 
 export const dynamic = "force-dynamic";
@@ -17,8 +18,9 @@ export default async function ResourcesPage() {
       <PageHeader
         eyebrow="Work — Capacity"
         title="Pool resources"
-        description="Delivery staff in the shared pool. The role band sets the charge rate; log their hours under Time."
+        description="Delivery staff in the shared pool. The role band sets the charge rate; log their hours under Time. Import your roster from a Karbon export."
       >
+        <ImportResourcesButton bandNames={bandOptions.map((b) => b.name)} />
         <NewResourceButton bands={bandOptions} />
       </PageHeader>
 

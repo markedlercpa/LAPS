@@ -1,14 +1,27 @@
 import Link from "next/link";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { NewEngagementButton } from "@/components/work/new-engagement";
-import { centsToUsd, ENGAGEMENT_TYPE_LABELS, ENGAGEMENT_STATUS_LABELS, labelFor } from "@/lib/work-taxonomy";
+import { centsToUsd, ENGAGEMENT_TYPES, ENGAGEMENT_TYPE_LABELS, ENGAGEMENT_STATUSES, ENGAGEMENT_STATUS_LABELS, labelFor } from "@/lib/work-taxonomy";
 
 export const dynamic = "force-dynamic";
 
-export default async function CapacityEngagementsPage() {
+export default async function CapacityEngagementsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ portfolio?: string; status?: string; type?: string }>;
+}) {
+  const sp = await searchParams;
+  const where: Prisma.PortfolioEngagementWhereInput = {
+    ...(sp.portfolio ? { portfolioId: sp.portfolio } : {}),
+    ...(sp.status && ENGAGEMENT_STATUSES.includes(sp.status as (typeof ENGAGEMENT_STATUSES)[number]) ? { status: sp.status } : {}),
+    ...(sp.type && ENGAGEMENT_TYPES.includes(sp.type as (typeof ENGAGEMENT_TYPES)[number]) ? { engagementType: sp.type } : {}),
+  };
+
   const [engagements, portfolios] = await Promise.all([
     prisma.portfolioEngagement.findMany({
+      where,
       orderBy: { updatedAt: "desc" },
       include: {
         portfolio: { select: { name: true } },
@@ -40,6 +53,31 @@ export default async function CapacityEngagementsPage() {
       >
         <NewEngagementButton portfolios={portfolios} />
       </PageHeader>
+
+      <form method="get" className="mb-4 flex flex-wrap items-end gap-2">
+        <label className="field">
+          <span className="micro-label">Portfolio</span>
+          <select name="portfolio" defaultValue={sp.portfolio ?? ""} className="input">
+            <option value="">All</option>
+            {portfolios.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span className="micro-label">Type</span>
+          <select name="type" defaultValue={sp.type ?? ""} className="input">
+            <option value="">All</option>
+            {ENGAGEMENT_TYPES.map((t) => <option key={t} value={t}>{ENGAGEMENT_TYPE_LABELS[t]}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span className="micro-label">Status</span>
+          <select name="status" defaultValue={sp.status ?? ""} className="input">
+            <option value="">All</option>
+            {ENGAGEMENT_STATUSES.map((s) => <option key={s} value={s}>{ENGAGEMENT_STATUS_LABELS[s]}</option>)}
+          </select>
+        </label>
+        <button className="btn btn-secondary" type="submit">Filter</button>
+      </form>
 
       {rows.length === 0 ? (
         <p className="text-[14px] text-muted">

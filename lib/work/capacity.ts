@@ -47,15 +47,17 @@ export async function addRoleBandRate(input: {
   loadedRateCents: number;
   billRateCents?: number | null;
   effectiveFrom: string; // ISO date
+  fiscalYear?: number | null;
   note?: string | null;
 }) {
   return prisma.roleBandRate.upsert({
     where: { roleBandId_effectiveFrom: { roleBandId: input.roleBandId, effectiveFrom: new Date(input.effectiveFrom) } },
-    update: { loadedRateCents: input.loadedRateCents, billRateCents: input.billRateCents ?? null, note: input.note ?? null },
+    update: { loadedRateCents: input.loadedRateCents, billRateCents: input.billRateCents ?? null, fiscalYear: input.fiscalYear ?? null, note: input.note ?? null },
     create: {
       roleBandId: input.roleBandId,
       loadedRateCents: input.loadedRateCents,
       billRateCents: input.billRateCents ?? null,
+      fiscalYear: input.fiscalYear ?? null,
       effectiveFrom: new Date(input.effectiveFrom),
       note: input.note ?? null,
     },
@@ -107,6 +109,7 @@ export async function createResource(input: {
 
 export async function createPortfolio(input: {
   name: string;
+  fiscalYear?: number | null;
   directorName: string;
   directorEmail: string;
   directorCostCentsAnnual?: number;
@@ -117,6 +120,7 @@ export async function createPortfolio(input: {
   return prisma.portfolio.create({
     data: {
       name: input.name,
+      fiscalYear: input.fiscalYear ?? null,
       directorName: input.directorName,
       directorEmail: input.directorEmail.toLowerCase(),
       directorCostCentsAnnual: input.directorCostCentsAnnual ?? 0,
@@ -125,6 +129,48 @@ export async function createPortfolio(input: {
       createdBy: input.createdBy ?? null,
     },
   });
+}
+
+/**
+ * Bulk-import pool resources from a parsed roster (e.g. a Karbon export). Maps
+ * each row's band name to an existing RoleBand (case-insensitive); rows whose
+ * band can't be matched are skipped and reported. Existing resources (by email)
+ * are updated, not duplicated. No Karbon connection — this is a manual import.
+ */
+export async function bulkImportResources(
+  rows: { personName: string; email: string; bandName: string; weeklyCapacityHours?: number; location?: string | null; costExempt?: boolean }[],
+  createdBy?: string | null,
+): Promise<{ created: number; updated: number; skipped: string[] }> {
+  const bands = await prisma.roleBand.findMany({ select: { id: true, name: true } });
+  const bandByName = new Map(bands.map((b) => [b.name.toLowerCase(), b.id]));
+
+  let created = 0;
+  let updated = 0;
+  const skipped: string[] = [];
+
+  for (const r of rows) {
+    const bandId = bandByName.get(r.bandName.trim().toLowerCase());
+    if (!bandId || !r.email || !r.personName) {
+      skipped.push(`${r.personName || r.email || "?"}${bandId ? "" : ` (unknown band "${r.bandName}")`}`);
+      continue;
+    }
+    const existing = await prisma.poolResource.findUnique({ where: { email: r.email.toLowerCase() }, select: { id: true } });
+    const data = {
+      personName: r.personName,
+      roleBandId: bandId,
+      weeklyCapacityHours: r.weeklyCapacityHours ?? 40,
+      location: r.location ?? null,
+      costExempt: r.costExempt ?? false,
+    };
+    if (existing) {
+      await prisma.poolResource.update({ where: { id: existing.id }, data });
+      updated += 1;
+    } else {
+      await prisma.poolResource.create({ data: { ...data, email: r.email.toLowerCase(), createdBy: createdBy ?? null } });
+      created += 1;
+    }
+  }
+  return { created, updated, skipped };
 }
 
 export async function createEngagement(input: {

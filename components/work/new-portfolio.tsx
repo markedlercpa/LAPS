@@ -17,6 +17,7 @@ export function NewPortfolioButton() {
     startTransition(async () => {
       const res = await createPortfolioAction({
         name: fd.get("name"),
+        fiscalYear: fd.get("fiscalYear") || undefined,
         directorName: fd.get("directorName"),
         directorEmail: fd.get("directorEmail"),
         directorCostAnnual: fd.get("directorCostAnnual"),
@@ -37,10 +38,16 @@ export function NewPortfolioButton() {
       </button>
       <Modal open={open} onClose={() => setOpen(false)} title="New portfolio">
         <form action={submit} className="space-y-3">
-          <label className="field">
-            <span className="micro-label">Portfolio name</span>
-            <input name="name" className="input" required placeholder="Sammy — QofE & CAS Book 1" />
-          </label>
+          <div className="grid grid-cols-[1fr_120px] gap-2">
+            <label className="field">
+              <span className="micro-label">Portfolio name</span>
+              <input name="name" className="input" required placeholder="Sammy — QofE & CAS Book 1" />
+            </label>
+            <label className="field">
+              <span className="micro-label">Fiscal year</span>
+              <input name="fiscalYear" type="number" min="2000" max="2100" className="input" placeholder="2026" />
+            </label>
+          </div>
           <div className="grid grid-cols-2 gap-2">
             <label className="field">
               <span className="micro-label">Director name</span>

@@ -9,6 +9,7 @@ import {
   createEngagement,
   replaceEngagementBudget,
   addRoleBandRate,
+  bulkImportResources,
   ensureRoleBandsSeeded,
 } from "@/lib/work/capacity";
 import { logTime, deleteTimeEntry } from "@/lib/work/time";
@@ -51,6 +52,7 @@ export async function createResourceAction(input: unknown) {
 
 const portfolioSchema = z.object({
   name: z.string().min(1, "Name is required"),
+  fiscalYear: z.coerce.number().int().min(2000).max(2100).optional().or(z.nan().transform(() => undefined)),
   directorName: z.string().min(1, "Director name is required"),
   directorEmail: z.string().email("Valid email required"),
   directorCostAnnual: z.coerce.number().min(0).default(0),
@@ -65,6 +67,7 @@ export async function createPortfolioAction(input: unknown) {
   if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
   const p = await createPortfolio({
     name: parsed.data.name,
+    fiscalYear: parsed.data.fiscalYear == null || Number.isNaN(parsed.data.fiscalYear) ? null : parsed.data.fiscalYear,
     directorName: parsed.data.directorName,
     directorEmail: parsed.data.directorEmail,
     directorCostCentsAnnual: dollarsToCents(parsed.data.directorCostAnnual),
@@ -124,6 +127,7 @@ const rateSchema = z.object({
   loadedRate: z.coerce.number().min(0),
   billRate: z.coerce.number().min(0).optional(),
   effectiveFrom: z.string().min(1),
+  fiscalYear: z.coerce.number().int().min(2000).max(2100).optional().or(z.nan().transform(() => undefined)),
   note: z.string().optional(),
 });
 
@@ -136,10 +140,60 @@ export async function addRoleBandRateAction(input: unknown) {
     loadedRateCents: dollarsToCents(parsed.data.loadedRate),
     billRateCents: parsed.data.billRate != null ? dollarsToCents(parsed.data.billRate) : null,
     effectiveFrom: parsed.data.effectiveFrom,
+    fiscalYear: parsed.data.fiscalYear == null || Number.isNaN(parsed.data.fiscalYear) ? null : parsed.data.fiscalYear,
     note: parsed.data.note || null,
   });
   revalidatePath("/work/capacity/admin");
   return { ok: true as const };
+}
+
+/**
+ * Import a roster CSV (e.g. from Karbon) into pool resources. Recognized columns
+ * (case-insensitive header, else positional): name, email, band, capacity,
+ * location, director. Band matches an existing role band by name.
+ */
+export async function importResourcesCsvAction(csv: string) {
+  const userId = await requireUser();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+  await ensureRoleBandsSeeded();
+  const lines = csv.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return { ok: false as const, error: "Nothing to import." };
+
+  const HEADERS = ["name", "email", "band", "capacity", "location", "director"];
+  const first = lines[0].toLowerCase();
+  const hasHeader = HEADERS.some((h) => first.includes(h)) && first.includes("email");
+  const cols = hasHeader ? lines[0].split(",").map((c) => c.trim().toLowerCase()) : null;
+  const dataLines = hasHeader ? lines.slice(1) : lines;
+  const idx = (name: string, fallback: number) => (cols ? cols.indexOf(name) : fallback);
+  const map = {
+    name: idx("name", 0),
+    email: idx("email", 1),
+    band: idx("band", 2),
+    capacity: idx("capacity", 3),
+    location: idx("location", 4),
+    director: idx("director", 5),
+  };
+
+  const rows = dataLines
+    .map((line) => {
+      const c = line.split(",").map((x) => x.trim());
+      const at = (i: number) => (i >= 0 ? c[i] : undefined) || undefined;
+      const cap = Number(at(map.capacity));
+      const dir = (at(map.director) ?? "").toLowerCase();
+      return {
+        personName: at(map.name) ?? "",
+        email: at(map.email) ?? "",
+        bandName: at(map.band) ?? "",
+        weeklyCapacityHours: Number.isFinite(cap) && cap > 0 ? cap : 40,
+        location: at(map.location) ?? null,
+        costExempt: ["y", "yes", "true", "1", "director"].includes(dir),
+      };
+    })
+    .filter((r) => r.email && r.personName);
+
+  const res = await bulkImportResources(rows, userId);
+  revalidatePath("/work/capacity/resources");
+  return { ok: true as const, ...res };
 }
 
 // ── Time tracking (native actuals) ──────────────────────────────────────────

@@ -97,7 +97,6 @@ const MODULES: Module[] = [
       { href: "/work/engagements", label: "Delivery", icon: ClipboardList },
       { href: "/work/capacity/grid", label: "Capacity grid", icon: CalendarRange },
       { href: "/work/capacity/queue", label: "Booking queue", icon: Inbox },
-      { href: "/work/capacity/metrics", label: "Pool metrics", icon: BarChart3 },
       { href: "/work/capacity/engagements", label: "Engagements", icon: Table2 },
       { href: "/work/capacity/time", label: "Time", icon: Clock },
       { href: "/work/capacity/portfolios", label: "Portfolios", icon: Landmark },

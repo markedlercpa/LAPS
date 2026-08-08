@@ -7,11 +7,19 @@ import { centsToUsd } from "@/lib/work-taxonomy";
 
 export const dynamic = "force-dynamic";
 
-export default async function PortfoliosPage() {
-  const portfolios = await prisma.portfolio.findMany({
-    orderBy: { createdAt: "asc" },
+export default async function PortfoliosPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ fy?: string }>;
+}) {
+  const sp = await searchParams;
+  const all = await prisma.portfolio.findMany({
+    orderBy: [{ fiscalYear: "desc" }, { createdAt: "asc" }],
     include: { _count: { select: { engagements: true } } },
   });
+  const fyOptions = Array.from(new Set(all.map((p) => p.fiscalYear).filter((y): y is number => y != null))).sort((a, b) => b - a);
+  const fySel = sp.fy && /^\d{4}$/.test(sp.fy) ? Number(sp.fy) : null;
+  const portfolios = fySel ? all.filter((p) => p.fiscalYear === fySel) : all;
 
   return (
     <div>
@@ -23,13 +31,27 @@ export default async function PortfoliosPage() {
         <NewPortfolioButton />
       </PageHeader>
 
+      {fyOptions.length > 0 && (
+        <form method="get" className="mb-4 flex items-end gap-2">
+          <label className="field">
+            <span className="micro-label">Fiscal year</span>
+            <select name="fy" defaultValue={fySel ?? ""} className="input">
+              <option value="">All years</option>
+              {fyOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </label>
+          <button className="btn btn-secondary" type="submit">Filter</button>
+        </form>
+      )}
+
       {portfolios.length === 0 ? (
-        <p className="text-[14px] text-muted">No portfolios yet. Create one to start assigning engagements.</p>
+        <p className="text-[14px] text-muted">No portfolios{fySel ? ` for FY${fySel}` : ""} yet. Create one to start assigning engagements.</p>
       ) : (
         <table className="table">
           <thead>
             <tr>
               <th>Portfolio</th>
+              <th>FY</th>
               <th>Director</th>
               <th className="num">Declared revenue</th>
               <th className="num">Base (%)</th>
@@ -50,6 +72,7 @@ export default async function PortfoliosPage() {
                   <td className="font-heading font-extrabold">
                     <Link href={`/work/capacity/portfolios/${p.id}`} className="text-accent-700">{p.name}</Link>
                   </td>
+                  <td className="text-muted">{p.fiscalYear ?? "—"}</td>
                   <td className="text-muted">{p.directorName}</td>
                   <td className="num">{centsToUsd(p.declaredPortfolioRevenueCents)}</td>
                   <td className="num">

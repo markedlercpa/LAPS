@@ -39,7 +39,7 @@ export default async function CapacityAdminPage() {
                   {b.rates.length === 0
                     ? "—"
                     : b.rates
-                        .map((r) => `${centsToUsd(r.loadedRateCents)} from ${r.effectiveFrom.toISOString().slice(0, 10)}`)
+                        .map((r) => `${centsToUsd(r.loadedRateCents)}${r.fiscalYear ? ` (FY${r.fiscalYear})` : ""} from ${r.effectiveFrom.toISOString().slice(0, 10)}`)
                         .slice(0, 3)
                         .join("; ")}
                 </td>
