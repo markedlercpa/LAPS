@@ -1,57 +1,66 @@
-import { Fragment } from "react";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
-import { MetricRow } from "@/components/metric-row";
-import { ImportTbButton } from "@/components/pace/import-tb";
-import { QboSyncButton } from "@/components/pace/qbo-sync";
-import { buildStatement, availableMonths, type StatementResult } from "@/lib/pace/statements";
+import { StatementMulti } from "@/components/pace/statement-multi";
+import { buildStatementColumns, availableMonths, COLUMN_LABELS, type ColumnKey } from "@/lib/pace/statements";
 import { ensureReportingCoaSeeded } from "@/lib/pace/coa";
 import { formatCurrency } from "@/lib/utils";
 import { qboConfigured } from "@/lib/pace/qbo";
+import { ImportTbButton } from "@/components/pace/import-tb";
+import { QboSyncButton } from "@/components/pace/qbo-sync";
 
 export const dynamic = "force-dynamic";
 
+const IS_COLUMNS: ColumnKey[] = ["month", "ytd", "ttm", "priorYear", "deltaYoY", "deltaYoYPct"];
+const BS_COLUMNS: ColumnKey[] = ["month", "priorMonth", "priorYear", "deltaYoY"];
+const DEFAULT_IS: ColumnKey[] = ["month", "ytd", "ttm"];
+const DEFAULT_BS: ColumnKey[] = ["month", "priorYear"];
+
 function monthLabel(iso: string): string {
-  const d = new Date(iso);
+  const d = new Date(`${iso}-01T00:00:00Z`);
   return d.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
 }
 
 export default async function ActualsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ entity?: string; month?: string; view?: string }>;
+  searchParams: Promise<{ entity?: string; month?: string; view?: string; cols?: string }>;
 }) {
   await ensureReportingCoaSeeded();
   const sp = await searchParams;
 
   const entities = await prisma.entity.findMany({ where: { active: true }, orderBy: { createdAt: "asc" } });
-  const months = await availableMonths();
   const entitySel = sp.entity ?? (entities[0]?.id ?? "");
-  const monthSel = sp.month ?? (months[0] ?? "");
-  const view = sp.view === "bs" ? "BS" : "IS";
   const consolidated = entitySel === "all";
+  const months = await availableMonths(consolidated ? undefined : entitySel || undefined);
+  const asOfFull = sp.month ?? (months[0] ?? "");
+  const asOf = asOfFull.slice(0, 7); // "YYYY-MM"
+  const view = sp.view === "bs" ? "BS" : "IS";
 
-  let statement: StatementResult | null = null;
-  let period: { balanced: boolean; status: string; source: string } | null = null;
-  if (monthSel && (consolidated || entitySel)) {
-    statement = await buildStatement(consolidated ? null : entitySel, monthSel, view);
-    if (!consolidated) {
-      const p = await prisma.trialBalancePeriod.findUnique({
-        where: { entityId_periodMonth: { entityId: entitySel, periodMonth: new Date(monthSel) } },
+  const available = view === "IS" ? IS_COLUMNS : BS_COLUMNS;
+  const requested = sp.cols
+    ? sp.cols.split(",").filter((c): c is ColumnKey => available.includes(c as ColumnKey))
+    : view === "IS" ? DEFAULT_IS : DEFAULT_BS;
+  const cols = requested.length ? requested : [available[0]];
+
+  const data = (asOf && (consolidated || entitySel))
+    ? await buildStatementColumns(consolidated ? null : entitySel, asOf, view, cols)
+    : null;
+
+  const period = !consolidated && asOf
+    ? await prisma.trialBalancePeriod.findUnique({
+        where: { entityId_periodMonth: { entityId: entitySel, periodMonth: new Date(`${asOf}-01`) } },
         select: { balanced: true, status: true, source: true },
-      });
-      period = p;
-    }
-  }
+      })
+    : null;
 
   return (
     <div>
       <PageHeader
         eyebrow="Finance — Actuals"
         title="Financial statements"
-        description="P&L and Balance Sheet rebuilt natively from the QuickBooks chart of accounts — no manual mapping. Per entity or consolidated; every figure ties to the loaded trial balance."
+        description="P&L and Balance Sheet rebuilt natively from the QuickBooks chart of accounts. Collapse sections, pick the period columns (Month / YTD / TTM / prior year / Δ), and drill any line to its transactions."
       >
-        {entitySel && entitySel !== "all" && (
+        {entitySel && !consolidated && (
           <>
             {qboConfigured() && <QboSyncButton entityId={entitySel} />}
             <ImportTbButton entityId={entitySel} />
@@ -70,18 +79,14 @@ export default async function ActualsPage({
               <span className="micro-label">Entity</span>
               <select name="entity" defaultValue={entitySel} className="input">
                 <option value="all">Consolidated</option>
-                {entities.map((e) => (
-                  <option key={e.id} value={e.id}>{e.name}</option>
-                ))}
+                {entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
               </select>
             </label>
             <label className="field">
-              <span className="micro-label">Month</span>
-              <select name="month" defaultValue={monthSel} className="input">
+              <span className="micro-label">As of month</span>
+              <select name="month" defaultValue={asOf} className="input">
                 {months.length === 0 && <option value="">— no data —</option>}
-                {months.map((m) => (
-                  <option key={m} value={m}>{monthLabel(m)}</option>
-                ))}
+                {months.map((m) => <option key={m} value={m.slice(0, 7)}>{monthLabel(m.slice(0, 7))}</option>)}
               </select>
             </label>
             <label className="field">
@@ -91,114 +96,43 @@ export default async function ActualsPage({
                 <option value="bs">Balance Sheet</option>
               </select>
             </label>
+            <div className="field">
+              <span className="micro-label">Columns</span>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 pt-1.5">
+                {available.map((c) => (
+                  <label key={c} className="flex items-center gap-1 text-[12px]">
+                    <input type="checkbox" name="cols" value={c} defaultChecked={cols.includes(c)} /> {COLUMN_LABELS[c]}
+                  </label>
+                ))}
+              </div>
+            </div>
             <button className="btn btn-secondary" type="submit">View</button>
           </form>
 
-          {!statement || statement.lines.length === 0 ? (
+          {!data || data.groups.length === 0 ? (
             <p className="text-[14px] text-muted">
-              {qboConfigured() && entitySel !== "all"
-                ? "No trial balances loaded yet. Click “Sync from QBO” to pull the last two years of actuals from QuickBooks — that also fills the month picker. Or use “Import trial balance” to paste one manually."
+              {qboConfigured() && !consolidated
+                ? "No trial balances loaded yet. Click “Sync from QBO” to pull actuals — that also fills the month picker."
                 : "No trial balance loaded for this selection. Use “Import trial balance” to add one."}
             </p>
           ) : (
-            <StatementBlock
-              statement={statement}
-              period={period}
-              consolidated={consolidated}
-              entityParam={consolidated ? "all" : entitySel}
-            />
+            <>
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                {period && <span className={`tag ${period.balanced ? "tag-accent" : "tag-outline"}`}>{period.balanced ? "Balanced" : "Out of balance"}</span>}
+                {period && <span className="tag tag-neutral">{period.status === "CLOSED" ? "Closed" : "Open"}</span>}
+                {period && <span className="tag tag-neutral">Source: {period.source}</span>}
+                {consolidated && <span className="tag tag-outline">Consolidated</span>}
+                {Math.abs(data.unclassifiedAmount[0] ?? 0) >= 0.5 && (
+                  <span className="tag tag-outline" title="Accounts QuickBooks didn't tag with an AccountType.">
+                    Unclassified: {formatCurrency(data.unclassifiedAmount[0])}
+                  </span>
+                )}
+              </div>
+              <StatementMulti data={data} entityParam={consolidated ? "all" : entitySel} />
+            </>
           )}
         </>
       )}
-    </div>
-  );
-}
-
-function StatementBlock({
-  statement,
-  period,
-  consolidated,
-  entityParam,
-}: {
-  statement: StatementResult;
-  period: { balanced: boolean; status: string; source: string } | null;
-  consolidated: boolean;
-  entityParam: string;
-}) {
-  const ym = statement.periodMonth.slice(0, 7); // "YYYY-MM"
-  const s = statement.subtotals;
-  const metrics =
-    statement.statement === "IS"
-      ? [
-          { label: "Revenue", value: formatCurrency(s.revenue ?? 0) },
-          { label: "Gross Profit", value: formatCurrency(s.grossProfit ?? 0) },
-          { label: "Operating Income", value: formatCurrency(s.operatingIncome ?? 0) },
-          { label: "Net Income", value: formatCurrency(s.netIncome ?? 0), accent: true },
-        ]
-      : [
-          { label: "Assets", value: formatCurrency(s.assets ?? 0) },
-          { label: "Liabilities", value: formatCurrency(s.liabilities ?? 0) },
-          { label: "Equity", value: formatCurrency(s.equity ?? 0) },
-          { label: "A − (L+E)", value: formatCurrency(s.checkDiff ?? 0), accent: Math.abs(s.checkDiff ?? 0) > 0.5 },
-        ];
-
-  return (
-    <div>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        {period && (
-          <span className={`tag ${period.balanced ? "tag-accent" : "tag-outline"}`}>
-            {period.balanced ? "Balanced" : "Out of balance"}
-          </span>
-        )}
-        {period && <span className="tag tag-neutral">{period.status === "CLOSED" ? "Closed" : "Open"}</span>}
-        {period && <span className="tag tag-neutral">Source: {period.source}</span>}
-        {consolidated && <span className="tag tag-outline">Consolidated</span>}
-        {Math.abs(statement.unclassifiedAmount) >= 0.5 && (
-          <span className="tag tag-outline" title="Accounts QuickBooks didn't tag with an AccountType — check the QBO chart of accounts.">
-            Unclassified: {formatCurrency(statement.unclassifiedAmount)}
-          </span>
-        )}
-      </div>
-
-      <MetricRow metrics={metrics} />
-
-      <table className="table mt-5">
-        <thead>
-          <tr>
-            <th>Account</th>
-            <th className="num">Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          {statement.groups.map((g) => (
-            <Fragment key={g.section}>
-              <tr>
-                <td className="pt-4 font-heading text-[12px] font-extrabold uppercase tracking-wide text-muted">{g.label}</td>
-                <td></td>
-              </tr>
-              {g.lines.map((l) => (
-                <tr key={l.ledgerAccountId}>
-                  <td style={{ paddingLeft: `${12 + l.depth * 16}px` }}>
-                    <a
-                      className="text-accent-700"
-                      href={`/finance/ledger?entity=${entityParam}&account=${l.ledgerAccountId}&from=${ym}&to=${ym}`}
-                      title="Drill into the transactions behind this line"
-                    >
-                      {l.acctNum ? <span className="text-muted">{l.acctNum} · </span> : null}
-                      {l.name}
-                    </a>
-                  </td>
-                  <td className="num">{formatCurrency(l.amount)}</td>
-                </tr>
-              ))}
-              <tr>
-                <td className="font-heading font-extrabold">Total {g.label}</td>
-                <td className="num font-heading font-extrabold">{formatCurrency(g.subtotal)}</td>
-              </tr>
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

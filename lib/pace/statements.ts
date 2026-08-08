@@ -188,6 +188,182 @@ export async function latestBankCashCents(entityId?: string): Promise<{ cents: n
   return { cents: Math.round(total * 100), asOf: months[0].slice(0, 10) };
 }
 
+// ── Multi-column statements (Month / YTD / TTM / prior-year / deltas) ─────────
+
+export type ColumnKey = "month" | "ytd" | "ttm" | "priorMonth" | "priorYear" | "deltaYoY" | "deltaYoYPct";
+
+export const COLUMN_LABELS: Record<ColumnKey, string> = {
+  month: "Month",
+  ytd: "YTD",
+  ttm: "TTM",
+  priorMonth: "Prior month",
+  priorYear: "Prior year",
+  deltaYoY: "Δ YoY",
+  deltaYoYPct: "Δ % YoY",
+};
+
+export type MultiLine = {
+  ledgerAccountId: string;
+  acctNum: string | null;
+  name: string;
+  depth: number;
+  accountType: string | null;
+  amounts: number[]; // one per requested column
+};
+export type MultiGroup = { section: QboSection; label: string; lines: MultiLine[]; subtotals: number[] };
+export type MultiStatement = {
+  statement: StatementKind;
+  asOf: string; // "YYYY-MM"
+  columns: { key: ColumnKey; label: string }[];
+  groups: MultiGroup[];
+  subtotals: Record<string, number[]>; // e.g. revenue/grossProfit/netIncome per column
+  unclassifiedAmount: number[];
+};
+
+function monthKey(d: Date): string {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+function shiftMonthKey(asOf: string, deltaMonths: number): string {
+  const [y, m] = asOf.split("-").map(Number);
+  return monthKey(new Date(Date.UTC(y, m - 1 + deltaMonths, 1)));
+}
+/** The set of month keys an IS column sums; BS uses only the last (as-of) month. */
+function monthsForColumn(key: ColumnKey, asOf: string): string[] {
+  const [y, m] = asOf.split("-").map(Number);
+  switch (key) {
+    case "month":
+    case "deltaYoY":
+    case "deltaYoYPct":
+      return [asOf];
+    case "ytd":
+      return Array.from({ length: m }, (_, i) => monthKey(new Date(Date.UTC(y, i, 1))));
+    case "ttm":
+      return Array.from({ length: 12 }, (_, i) => shiftMonthKey(asOf, -(11 - i)));
+    case "priorMonth":
+      return [shiftMonthKey(asOf, -1)];
+    case "priorYear":
+      return [shiftMonthKey(asOf, -12)];
+  }
+}
+
+/**
+ * Build a statement with several period columns at once (Month, YTD, TTM,
+ * prior-period, and YoY deltas), classified natively by QBO metadata. For IS a
+ * column is the sum of its months' activity; for BS it's the balance at the
+ * column's as-of month. `deltaYoY`/`deltaYoYPct` are derived from month vs.
+ * prior-year and don't sum into section subtotals as dollars twice.
+ */
+export async function buildStatementColumns(
+  entityId: string | null,
+  asOf: string, // "YYYY-MM"
+  statement: StatementKind,
+  columns: ColumnKey[],
+): Promise<MultiStatement> {
+  const isIS = statement === "IS";
+  // Load a trailing 24-month window (covers TTM + prior year) up to asOf.
+  const windowStart = new Date(`${shiftMonthKey(asOf, -23)}-01T00:00:00Z`);
+  const asOfEnd = new Date(Date.UTC(Number(asOf.split("-")[0]), Number(asOf.split("-")[1]), 0));
+
+  const periods = await prisma.trialBalancePeriod.findMany({
+    where: { periodMonth: { gte: windowStart, lte: asOfEnd }, ...(entityId ? { entityId } : {}) },
+    include: { lines: { include: { ledgerAccount: true } } },
+  });
+
+  // account id → { meta, natural amount per month key }
+  type Acc = { line: Omit<MultiLine, "amounts">; section: QboSection; sortOrder: number; byMonth: Map<string, number> };
+  const accounts = new Map<string, Acc>();
+  for (const p of periods) {
+    const mk = monthKey(p.periodMonth);
+    for (const l of p.lines) {
+      const a = l.ledgerAccount;
+      const def = classifyAccount({ accountType: a.sourceType, classification: a.classification });
+      if (def.statement !== statement) continue;
+      const signed = Number(l.amount);
+      const nat = def.naturalSide === "CREDIT" ? -signed : signed;
+      let acc = accounts.get(a.id);
+      if (!acc) {
+        acc = {
+          line: {
+            ledgerAccountId: a.id,
+            acctNum: a.acctNum,
+            name: leafName(a.fqName, a.name),
+            depth: a.fqName ? a.fqName.split(":").length - 1 : 0,
+            accountType: a.sourceType,
+          },
+          section: def.section,
+          sortOrder: def.sortOrder,
+          byMonth: new Map(),
+        };
+        accounts.set(a.id, acc);
+      }
+      acc.byMonth.set(mk, (acc.byMonth.get(mk) ?? 0) + nat);
+    }
+  }
+
+  const amountFor = (acc: Acc, col: ColumnKey): number => {
+    if (col === "deltaYoY" || col === "deltaYoYPct") {
+      const cur = acc.byMonth.get(asOf) ?? 0;
+      const py = acc.byMonth.get(shiftMonthKey(asOf, -12)) ?? 0;
+      if (col === "deltaYoY") return cur - py;
+      return py !== 0 ? ((cur - py) / Math.abs(py)) * 100 : 0;
+    }
+    const months = monthsForColumn(col, asOf);
+    if (isIS) return months.reduce((s, mk) => s + (acc.byMonth.get(mk) ?? 0), 0);
+    // BS: balance at the column's as-of (last) month.
+    return acc.byMonth.get(months[months.length - 1]) ?? 0;
+  };
+
+  const rows = Array.from(accounts.values())
+    .map((acc) => ({ acc, amounts: columns.map((c) => amountFor(acc, c)) }))
+    .filter((r) => r.amounts.some((v) => Math.abs(v) >= 0.005))
+    .sort((a, b) => a.acc.sortOrder - b.acc.sortOrder || byAcctNum(a.acc.line, b.acc.line));
+
+  const groups: MultiGroup[] = [];
+  for (const section of sectionsFor(statement)) {
+    const secRows = rows.filter((r) => r.acc.section === section);
+    if (secRows.length === 0) continue;
+    const subtotals = columns.map((_, ci) => secRows.reduce((s, r) => s + r.amounts[ci], 0));
+    groups.push({
+      section,
+      label: SECTION_LABELS[section],
+      lines: secRows.map((r) => ({ ...r.acc.line, amounts: r.amounts })),
+      subtotals,
+    });
+  }
+
+  const sectionCol = (section: QboSection, ci: number) =>
+    rows.filter((r) => r.acc.section === section).reduce((s, r) => s + r.amounts[ci], 0);
+  const perCol = <T,>(fn: (ci: number) => T) => columns.map((_, ci) => fn(ci));
+
+  const subtotals: Record<string, number[]> = {};
+  if (isIS) {
+    subtotals.revenue = perCol((ci) => sectionCol("Revenue", ci));
+    subtotals.cogs = perCol((ci) => sectionCol("COGS", ci));
+    subtotals.grossProfit = perCol((ci) => sectionCol("Revenue", ci) - sectionCol("COGS", ci));
+    subtotals.opex = perCol((ci) => sectionCol("OpEx", ci));
+    subtotals.operatingIncome = perCol((ci) => subtotals.grossProfit[ci] - sectionCol("OpEx", ci));
+    subtotals.otherIncome = perCol((ci) => sectionCol("OtherIncome", ci));
+    subtotals.otherExpense = perCol((ci) => sectionCol("OtherExpense", ci));
+    subtotals.netIncome = perCol(
+      (ci) => subtotals.operatingIncome[ci] + sectionCol("OtherIncome", ci) - sectionCol("OtherExpense", ci) - sectionCol("Unclassified", ci),
+    );
+  } else {
+    subtotals.assets = perCol((ci) => sectionCol("Asset", ci));
+    subtotals.liabilities = perCol((ci) => sectionCol("Liability", ci));
+    subtotals.equity = perCol((ci) => sectionCol("Equity", ci));
+    subtotals.checkDiff = perCol((ci) => sectionCol("Asset", ci) - (sectionCol("Liability", ci) + sectionCol("Equity", ci)));
+  }
+
+  return {
+    statement,
+    asOf,
+    columns: columns.map((k) => ({ key: k, label: COLUMN_LABELS[k] })),
+    groups,
+    subtotals,
+    unclassifiedAmount: perCol((ci) => sectionCol("Unclassified", ci)),
+  };
+}
+
 /** Distinct months that have any trial balance loaded (newest first). */
 export async function availableMonths(entityId?: string): Promise<string[]> {
   const periods = await prisma.trialBalancePeriod.findMany({

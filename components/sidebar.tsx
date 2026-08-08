@@ -112,7 +112,6 @@ const MODULES: Module[] = [
     icon: Gauge,
     items: [
       { href: "/finance/actuals", label: "Actuals", icon: Landmark },
-      { href: "/finance/ledger", label: "General Ledger", icon: FileText },
       { href: "/finance/cash", label: "Cash Forecast", icon: Waves },
       { href: "/finance/budgets", label: "Budgets", icon: Table2 },
       { href: "/finance/variance", label: "Budget vs Actual", icon: Scale },
