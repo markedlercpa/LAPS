@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { MetricRow } from "@/components/metric-row";
+import { SegToggle } from "@/components/ui/seg";
+import { CalendarMonth, currentMonth, shiftMonth, type CalendarEvent } from "@/components/calendar-month";
 import { prisma } from "@/lib/prisma";
 import { formatDate } from "@/lib/utils";
 import { CONTENT_CHANNEL_LABELS } from "@/lib/echo-taxonomy";
@@ -10,7 +12,14 @@ export const dynamic = "force-dynamic";
 
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 
-export default async function OpticsPage() {
+export default async function OpticsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ view?: string; m?: string }>;
+}) {
+  const sp = await searchParams;
+  const view = sp.view === "calendar" ? "calendar" : "overview";
+  const month = /^\d{4}-\d{2}$/.test(sp.m ?? "") ? sp.m! : currentMonth();
   const [snapshots, items] = await Promise.all([
     prisma.metricSnapshot.findMany({
       orderBy: { capturedAt: "desc" },
@@ -62,13 +71,38 @@ export default async function OpticsPage() {
   return (
     <div>
       <PageHeader
-        eyebrow="Marketing — Optics"
-        title="Resonance & performance"
+        eyebrow="Marketing — Content Performance"
+        title="Content Performance"
         description="How content performed once it ran. Numbers are aggregated manually — no analytics connector yet."
       >
         <NewMetric items={items} />
       </PageHeader>
 
+      <div className="mb-6">
+        <SegToggle
+          param="view"
+          defaultValue="overview"
+          options={[
+            { value: "overview", label: "Overview" },
+            { value: "calendar", label: "Calendar" },
+          ]}
+        />
+      </div>
+
+      {view === "calendar" ? (
+        <PerfCalendar
+          month={month}
+          events={snapshots
+            .filter((s) => s.contentItem)
+            .map((s) => ({
+              dateISO: s.capturedAt.toISOString().slice(0, 10),
+              label: `${s.contentItem!.title} · ${s.engagements.toLocaleString()} eng`,
+              href: `/marketing/content/${s.contentItem!.id}`,
+              tone: "ink" as const,
+            }))}
+        />
+      ) : (
+      <>
       <MetricRow
         metrics={[
           { label: "Impressions", value: totals.impressions.toLocaleString() },
@@ -152,6 +186,22 @@ export default async function OpticsPage() {
           )}
         </div>
       </div>
+      </>
+      )}
+    </div>
+  );
+}
+
+function PerfCalendar({ month, events }: { month: string; events: CalendarEvent[] }) {
+  return (
+    <div>
+      <p className="mb-3 text-[13px] text-muted">Performance snapshots by capture date. Click a reading to open the piece.</p>
+      <CalendarMonth
+        month={month}
+        events={events}
+        prevHref={`?view=calendar&m=${shiftMonth(month, -1)}`}
+        nextHref={`?view=calendar&m=${shiftMonth(month, 1)}`}
+      />
     </div>
   );
 }

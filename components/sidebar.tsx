@@ -49,10 +49,13 @@ const MODULES: Module[] = [
   {
     key: "triage",
     name: "Triage",
-    caption: "Email",
+    caption: "Email & tasks",
     href: "/inbox",
     icon: Inbox,
-    items: [], // single-page module
+    items: [
+      { href: "/inbox", label: "Inbox", icon: Inbox },
+      { href: "/tasks", label: "To-Do", icon: ClipboardList },
+    ],
   },
   {
     key: "marketing",
@@ -62,9 +65,9 @@ const MODULES: Module[] = [
     icon: Radio,
     items: [
       { href: "/marketing/evidence", label: "Evidence", icon: Vault },
-      { href: "/marketing/calling-cards", label: "Calling Cards", icon: Megaphone },
-      { href: "/marketing/content", label: "Housed Content", icon: PenLine },
-      { href: "/marketing/optics", label: "Optics", icon: LineChart },
+      { href: "/marketing/calling-cards", label: "Keywords & Phrases", icon: Megaphone },
+      { href: "/marketing/content", label: "Content Builder", icon: PenLine },
+      { href: "/marketing/optics", label: "Content Performance", icon: LineChart },
     ],
   },
   {
@@ -121,7 +124,7 @@ const MODULES: Module[] = [
 ];
 
 function activeModuleKey(pathname: string): string | null {
-  if (pathname.startsWith("/inbox")) return "triage";
+  if (pathname.startsWith("/inbox") || pathname.startsWith("/tasks")) return "triage";
   if (pathname.startsWith("/marketing")) return "marketing";
   if (pathname.startsWith("/work")) return "work";
   if (pathname.startsWith("/finance")) return "finance";

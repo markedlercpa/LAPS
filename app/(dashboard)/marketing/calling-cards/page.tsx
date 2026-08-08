@@ -25,8 +25,8 @@ export default async function CallingCardsPage() {
   return (
     <div>
       <PageHeader
-        eyebrow="Marketing — Calling Cards"
-        title="Calling card bank"
+        eyebrow="Marketing — Keywords & Phrases"
+        title="Keywords & Phrases"
         description="Repeatable, ownable language. Every published piece should carry at least one active card."
       >
         <NewCallingCard bannedPhrases={banned.map((b) => b.phrase)} />

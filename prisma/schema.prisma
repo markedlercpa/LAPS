@@ -208,6 +208,15 @@ enum ActionItemSource {
   FIREFLIES
 }
 
+/// GTD workflow bucket for the Triage to-do list.
+enum GtdBucket {
+  INBOX // unprocessed
+  NEXT // next actions (actionable now)
+  WAITING // waiting-for (delegated / blocked)
+  SCHEDULED // has a date / calendar item
+  SOMEDAY // someday-maybe
+}
+
 model ActionItem {
   id            String           @id @default(cuid())
   appointmentId String?
@@ -217,6 +226,12 @@ model ActionItem {
   dueDate       DateTime?
   status        ActionItemStatus @default(OPEN)
   source        ActionItemSource @default(MANUAL)
+  // Triage to-do organization: Eisenhower matrix (important × urgent) + GTD.
+  important     Boolean          @default(false)
+  urgent        Boolean          @default(false)
+  gtd           GtdBucket        @default(INBOX)
+  context       String? // GTD context, e.g. "@calls", "@computer", "@errands"
+  notes         String?          @db.Text
   createdAt     DateTime         @default(now())
 
   appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
@@ -225,6 +240,7 @@ model ActionItem {
 
   @@index([appointmentId])
   @@index([status])
+  @@index([gtd])
 }
 
 enum ProposalStatus {
