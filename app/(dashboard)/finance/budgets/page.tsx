@@ -2,7 +2,9 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { NewBudgetButton } from "@/components/pace/new-budget";
+import { ImportQboBudgetButton } from "@/components/pace/import-qbo-budget";
 import { DeleteBudgetButton } from "@/components/pace/delete-budget";
+import { qboConfigured } from "@/lib/pace/qbo";
 
 export const dynamic = "force-dynamic";
 
@@ -13,21 +15,25 @@ export default async function BudgetsPage() {
     prisma.entity.findMany({
       where: { active: true },
       orderBy: { createdAt: "asc" },
-      select: { id: true, name: true },
+      select: { id: true, name: true, connection: { select: { provider: true, status: true } } },
     }),
     prisma.budget.findMany({
       orderBy: [{ fiscalYear: "desc" }, { createdAt: "asc" }],
       include: { entity: { select: { name: true } }, _count: { select: { lines: true } } },
     }),
   ]);
+  const qboEntities = qboConfigured()
+    ? entities.filter((e) => e.connection?.provider === "QBO" && e.connection?.status === "connected").map((e) => ({ id: e.id, name: e.name }))
+    : [];
 
   return (
     <div>
       <PageHeader
         eyebrow="Finance — Expectations"
         title="Budgets"
-        description="Plan by reporting-COA line, per entity and fiscal year. Versions are lockable; reforecasts and scenarios are new versions — nothing is overwritten."
+        description="Plan natively by QuickBooks account, per entity and fiscal year. Versions are lockable; reforecasts and scenarios are new versions — nothing is overwritten."
       >
+        <ImportQboBudgetButton entities={qboEntities} />
         <NewBudgetButton
           entities={entities.map((e) => ({ id: e.id, name: e.name }))}
           budgets={budgets.map((b) => ({ id: b.id, label: `${b.entity.name} · ${b.label}` }))}

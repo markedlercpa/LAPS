@@ -2,7 +2,6 @@ import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { StatementMulti } from "@/components/pace/statement-multi";
 import { buildStatementColumns, availableMonths, COLUMN_LABELS, type ColumnKey } from "@/lib/pace/statements";
-import { ensureReportingCoaSeeded } from "@/lib/pace/coa";
 import { formatCurrency } from "@/lib/utils";
 import { qboConfigured } from "@/lib/pace/qbo";
 import { ImportTbButton } from "@/components/pace/import-tb";
@@ -25,7 +24,6 @@ export default async function ActualsPage({
 }: {
   searchParams: Promise<{ entity?: string; month?: string; view?: string; cols?: string }>;
 }) {
-  await ensureReportingCoaSeeded();
   const sp = await searchParams;
 
   const entities = await prisma.entity.findMany({ where: { active: true }, orderBy: { createdAt: "asc" } });

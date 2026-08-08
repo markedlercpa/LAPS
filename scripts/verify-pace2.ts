@@ -1,11 +1,10 @@
 /**
  * Throwaway smoke test for PACE Phase 2 (Expectations) under the QBO-native
- * rebuild. Budgets stay on the reporting COA; budget-vs-actual is section-level
- * (actuals classified by QBO AccountType). Run from repo root:
+ * rebuild. Budgets are native at the QBO account level; budget-vs-actual is
+ * account-to-account. Run from repo root:
  *   set -a && . ./.env && set +a && npx tsx scripts/verify-pace2.ts
  */
 import { prisma } from "@/lib/prisma";
-import { ensureReportingCoaSeeded } from "@/lib/pace/coa";
 import { importTrialBalance } from "@/lib/pace/import";
 import { createBudget, saveBudgetLinesBulk, setBudgetStatus, deleteBudget } from "@/lib/pace/budgets";
 import { computeVariance } from "@/lib/pace/variance";
@@ -14,15 +13,10 @@ import { upsertNote, notesForMonth, narrativesConfigured } from "@/lib/pace/narr
 const MONTH = "2026-07-01";
 
 async function main() {
-  await ensureReportingCoaSeeded();
-  const ra = await prisma.reportingAccount.findMany({ select: { id: true, code: true } });
-  const byCode = new Map(ra.map((r) => [r.code, r.id]));
-  const revId = byCode.get("4100") as string; // type Revenue
-  const payId = byCode.get("6000") as string; // type OpEx
-
   const entity = await prisma.entity.create({ data: { name: "ZZZ P2 Co", connection: { create: {} } } });
 
   // Actuals classified natively by QBO AccountType: revenue 210k, payroll 90k.
+  // importTrialBalance keys LedgerAccounts by externalId (= name when none given).
   await importTrialBalance({
     entityId: entity.id,
     periodMonth: MONTH,
@@ -32,37 +26,41 @@ async function main() {
       { name: "Payroll", amount: 90000, accountType: "Expense" },
     ],
   });
+  const accts = await prisma.ledgerAccount.findMany({ where: { entityId: entity.id }, select: { id: true, name: true } });
+  const revId = accts.find((a) => a.name === "Revenue")!.id;
+  const payId = accts.find((a) => a.name === "Payroll")!.id;
 
-  // Budget: revenue 200k, payroll 80k for the month (per reporting line).
+  // Budget natively per QBO account: revenue 200k, payroll 80k for the month.
   const budget = await createBudget({ entityId: entity.id, fiscalYear: 2026, label: "FY Original" });
   await saveBudgetLinesBulk(budget.id, [
-    { reportingAccountId: revId, monthly: { "2026-07": 200000 } },
-    { reportingAccountId: payId, monthly: { "2026-07": 80000 } },
+    { ledgerAccountId: revId, monthly: { "2026-07": 200000 } },
+    { ledgerAccountId: payId, monthly: { "2026-07": 80000 } },
   ]);
 
   const v = await computeVariance({ entityId: entity.id, budgetId: budget.id, periodMonthISO: MONTH, basis: "month" });
-  const rev = v.rows.find((r) => r.accountKey === "Revenue")!;
-  const pay = v.rows.find((r) => r.accountKey === "OpEx")!;
-  console.log(`Revenue: actual=${rev.actual} budget=${rev.budget} var=${rev.varianceAmt} fav=${rev.favorable} material=${rev.material}`);
-  console.log(`OpEx:    actual=${pay.actual} budget=${pay.budget} var=${pay.varianceAmt} fav=${pay.favorable} material=${pay.material}`);
-  if (rev.actual !== 210000 || rev.budget !== 200000 || rev.varianceAmt !== 10000) throw new Error("revenue variance wrong");
+  const rev = v.rows.find((r) => r.accountKey === revId)!;
+  const pay = v.rows.find((r) => r.accountKey === payId)!;
+  console.log(`Revenue: actual=${rev.actual} budget=${rev.budget} var=${rev.varianceAmt} fav=${rev.favorable} section=${rev.type}`);
+  console.log(`OpEx:    actual=${pay.actual} budget=${pay.budget} var=${pay.varianceAmt} fav=${pay.favorable} section=${pay.type}`);
+  if (rev.actual !== 210000 || rev.budget !== 200000 || rev.varianceAmt !== 10000 || rev.type !== "Revenue") throw new Error("revenue variance wrong");
   if (rev.favorable !== true) throw new Error("revenue over budget should be favorable");
-  if (pay.varianceAmt !== 10000 || pay.favorable !== false) throw new Error("opex over budget should be unfavorable");
+  if (pay.varianceAmt !== 10000 || pay.favorable !== false || pay.type !== "OpEx") throw new Error("opex over budget should be unfavorable");
   if (!rev.material || !pay.material) throw new Error("both variances should be material (>=5000)");
-  console.log(`materialRows=${v.materialRows.length} (expect >=2)`);
+  console.log(`materialRows=${v.materialRows.length} (expect >=2), subtotal Revenue var=${v.subtotals.Revenue?.varianceAmt}`);
   if (v.materialRows.length < 2) throw new Error("expected material rows");
+  if (v.subtotals.Revenue?.varianceAmt !== 10000) throw new Error("section subtotal wrong");
 
   // Lock blocks edits.
   await setBudgetStatus(budget.id, true);
-  const locked = await saveBudgetLinesBulk(budget.id, [{ reportingAccountId: revId, monthly: { "2026-07": 999 } }]);
+  const locked = await saveBudgetLinesBulk(budget.id, [{ ledgerAccountId: revId, monthly: { "2026-07": 999 } }]);
   console.log(`locked save → ok=${locked.ok} (expect false)`);
   if (locked.ok) throw new Error("locked budget should reject edits");
 
-  // Narrative save + read, keyed by section (accountKey).
-  await upsertNote({ entityId: entity.id, accountKey: "Revenue", periodMonthISO: MONTH, text: "New engagement closed early.", aiDrafted: false });
+  // Narrative save + read, keyed by account (accountKey = ledgerAccountId).
+  await upsertNote({ entityId: entity.id, accountKey: revId, periodMonthISO: MONTH, text: "New engagement closed early.", aiDrafted: false });
   const notes = await notesForMonth(entity.id, MONTH);
-  console.log(`note saved: "${notes.get("Revenue")?.text}"`);
-  if (!notes.get("Revenue")) throw new Error("narrative not saved");
+  console.log(`note saved: "${notes.get(revId)?.text}"`);
+  if (!notes.get(revId)) throw new Error("narrative not saved");
 
   console.log(`\nnarrativesConfigured=${narrativesConfigured()} (AI draft ${narrativesConfigured() ? "available" : "off"})`);
 

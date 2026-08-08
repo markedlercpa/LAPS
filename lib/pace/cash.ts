@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { isoWeekOf, isoWeekStart } from "@/lib/work-taxonomy";
 import { rateForBandWeek } from "@/lib/work/capacity";
 import { latestBankCashCents } from "@/lib/pace/statements";
+import { classifyAccount } from "@/lib/pace/qbo-taxonomy";
 import { CASH_CATEGORY_MAP, categoriesFor, type CashMode } from "@/lib/pace/cash-taxonomy";
 
 /**
@@ -254,13 +255,20 @@ export type IndirectForecast = {
   ending: number[];
 };
 
-/** Monthly P&L from the winning budget per entity/fiscal-year (LOCKED else latest). */
+/** Split an Other-Expense account into the indirect model's below-the-line
+ * bucket by name/subtype (no reporting codes anymore). */
+function belowLineBucket(name: string, subType: string | null): "dna" | "interest" | "tax" | null {
+  const s = `${name} ${subType ?? ""}`.toLowerCase();
+  if (/deprec|amort|depletion/.test(s)) return "dna";
+  if (/interest/.test(s)) return "interest";
+  if (/income tax|\btax\b/.test(s)) return "tax";
+  return null;
+}
+
+/** Monthly P&L from the winning budget per entity/fiscal-year (LOCKED else
+ * latest), classified natively by QBO account type. */
 async function budgetPnlMonthly(monthKeys: string[]): Promise<Record<string, { revenue: number; cogs: number; opex: number; dna: number; interest: number; tax: number }>> {
-  const [accounts, budgets] = await Promise.all([
-    prisma.reportingAccount.findMany({ select: { id: true, type: true, code: true } }),
-    prisma.budget.findMany({ select: { id: true, entityId: true, fiscalYear: true, status: true, createdAt: true } }),
-  ]);
-  const acct = new Map(accounts.map((a) => [a.id, a]));
+  const budgets = await prisma.budget.findMany({ select: { id: true, entityId: true, fiscalYear: true, status: true, createdAt: true } });
 
   // Winning budget per (entity, fiscalYear): LOCKED first, then most recent.
   const winners = new Map<string, { id: string; locked: boolean; createdAt: Date }>();
@@ -272,28 +280,31 @@ async function budgetPnlMonthly(monthKeys: string[]): Promise<Record<string, { r
       winners.set(k, { id: b.id, locked, createdAt: b.createdAt });
     }
   }
-  const winnerIds = new Set(Array.from(winners.values()).map((w) => w.id));
-  const lines = winnerIds.size
-    ? await prisma.budgetLine.findMany({ where: { budgetId: { in: Array.from(winnerIds) } }, select: { reportingAccountId: true, monthly: true } })
+  const winnerIds = Array.from(winners.values()).map((w) => w.id);
+  const lines = winnerIds.length
+    ? await prisma.budgetLine.findMany({
+        where: { budgetId: { in: winnerIds } },
+        include: { ledgerAccount: { select: { sourceType: true, classification: true, accountSubType: true, name: true } } },
+      })
     : [];
 
   const out: Record<string, { revenue: number; cogs: number; opex: number; dna: number; interest: number; tax: number }> = {};
   for (const mk of monthKeys) out[mk] = { revenue: 0, cogs: 0, opex: 0, dna: 0, interest: 0, tax: 0 };
   for (const l of lines) {
-    const a = acct.get(l.reportingAccountId);
-    if (!a) continue;
+    const a = l.ledgerAccount;
+    const def = classifyAccount({ accountType: a.sourceType, classification: a.classification });
     const monthly = (l.monthly ?? {}) as Record<string, number>;
     for (const mk of monthKeys) {
       const cents = Math.round((Number(monthly[mk]) || 0) * 100);
       if (!cents) continue;
       const b = out[mk];
-      if (a.type === "Revenue") b.revenue += cents;
-      else if (a.type === "COGS") b.cogs += cents;
-      else if (a.type === "OpEx") b.opex += cents;
-      else if (a.type === "OtherExpense") {
-        if (a.code === "7100") b.dna += cents;
-        else if (a.code === "7000") b.interest += cents;
-        else if (a.code === "7900") b.tax += cents;
+      if (def.section === "Revenue" || def.section === "OtherIncome") b.revenue += cents;
+      else if (def.section === "COGS") b.cogs += cents;
+      else if (def.section === "OpEx") b.opex += cents;
+      else if (def.section === "OtherExpense") {
+        const bucket = belowLineBucket(a.name, a.accountSubType);
+        if (bucket) b[bucket] += cents;
+        else b.opex += cents; // uncategorized below-the-line → treat as opex
       }
     }
   }

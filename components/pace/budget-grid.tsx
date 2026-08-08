@@ -1,18 +1,17 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { Fragment, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Save, Lock, Unlock } from "lucide-react";
-import type { StatementKind } from "@prisma/client";
 import { saveBudgetGridAction, setBudgetStatusAction } from "@/app/(dashboard)/finance/budget-actions";
 import { formatCurrency } from "@/lib/utils";
 
 export type BudgetGridRow = {
-  reportingAccountId: string;
-  code: string | null;
+  ledgerAccountId: string;
+  acctNum: string | null;
   name: string;
-  statement: StatementKind;
-  type: string;
+  section: string;
+  sectionLabel: string;
   monthly: Record<string, number>;
 };
 
@@ -22,8 +21,9 @@ function monthShort(key: string): string {
 }
 
 /**
- * Editable budget grid: reporting accounts × 12 months. Holds edits in state and
- * saves the whole grid in one action. Read-only when the budget is locked.
+ * Editable budget grid: the entity's QBO accounts × 12 months, grouped by
+ * statement section. Holds edits in state and saves the whole grid in one
+ * action. Read-only when the budget is locked.
  */
 export function BudgetGrid({
   budgetId,
@@ -42,8 +42,8 @@ export function BudgetGrid({
   const [data, setData] = useState<Record<string, Record<string, string>>>(() => {
     const init: Record<string, Record<string, string>> = {};
     for (const r of rows) {
-      init[r.reportingAccountId] = {};
-      for (const m of months) init[r.reportingAccountId][m] = r.monthly[m] != null ? String(r.monthly[m]) : "";
+      init[r.ledgerAccountId] = {};
+      for (const m of months) init[r.ledgerAccountId][m] = r.monthly[m] != null ? String(r.monthly[m]) : "";
     }
     return init;
   });
@@ -51,7 +51,6 @@ export function BudgetGrid({
   function setCell(accId: string, month: string, value: string) {
     setData((d) => ({ ...d, [accId]: { ...d[accId], [month]: value } }));
   }
-
   function rowTotal(accId: string): number {
     return months.reduce((s, m) => s + (Number(data[accId]?.[m]) || 0), 0);
   }
@@ -61,10 +60,10 @@ export function BudgetGrid({
     const lines = rows.map((r) => {
       const monthly: Record<string, number> = {};
       for (const m of months) {
-        const n = Number(data[r.reportingAccountId]?.[m]);
-        if (data[r.reportingAccountId]?.[m] !== "" && Number.isFinite(n)) monthly[m] = n;
+        const n = Number(data[r.ledgerAccountId]?.[m]);
+        if (data[r.ledgerAccountId]?.[m] !== "" && Number.isFinite(n)) monthly[m] = n;
       }
-      return { reportingAccountId: r.reportingAccountId, monthly };
+      return { ledgerAccountId: r.ledgerAccountId, monthly };
     });
     startTransition(async () => {
       const res = await saveBudgetGridAction(budgetId, lines);
@@ -80,8 +79,9 @@ export function BudgetGrid({
     });
   }
 
-  const isRows = rows.filter((r) => r.statement === "IS");
-  const bsRows = rows.filter((r) => r.statement === "BS");
+  // Section order preserved from the (already-sorted) rows.
+  const sections: { key: string; label: string }[] = [];
+  for (const r of rows) if (!sections.some((s) => s.key === r.section)) sections.push({ key: r.section, label: r.sectionLabel });
 
   return (
     <div>
@@ -99,38 +99,36 @@ export function BudgetGrid({
         {locked && <span className="text-[13px] text-accent-700">Locked — unlock to edit.</span>}
       </div>
 
-      <div className="overflow-x-auto border-2 border-divider">
-        <table className="table min-w-[1100px] text-[12px]">
-          <thead>
-            <tr>
-              <th className="sticky left-0 bg-surface">Account</th>
-              {months.map((m) => (
-                <th key={m} className="num">{monthShort(m)}</th>
+      {rows.length === 0 ? (
+        <p className="text-[14px] text-muted">
+          No accounts for this entity yet. Sync the QuickBooks chart of accounts on <a className="text-accent-700" href="/finance/actuals">Actuals</a>, then budget by account here.
+        </p>
+      ) : (
+        <div className="overflow-x-auto border-2 border-divider">
+          <table className="table min-w-[1100px] text-[12px]">
+            <thead>
+              <tr>
+                <th className="sticky left-0 bg-surface">Account</th>
+                {months.map((m) => <th key={m} className="num">{monthShort(m)}</th>)}
+                <th className="num">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sections.map((sec) => (
+                <Fragment key={sec.key}>
+                  <tr>
+                    <td colSpan={months.length + 2} className="micro-label bg-[color-mix(in_srgb,var(--color-text)_5%,transparent)] py-1.5">{sec.label}</td>
+                  </tr>
+                  {rows.filter((r) => r.section === sec.key).map((r) => (
+                    <GridRow key={r.ledgerAccountId} r={r} months={months} data={data} setCell={setCell} rowTotal={rowTotal} locked={locked} />
+                  ))}
+                </Fragment>
               ))}
-              <th className="num">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            <Section label="Income Statement" span={months.length + 2} />
-            {isRows.map((r) => (
-              <GridRow key={r.reportingAccountId} r={r} months={months} data={data} setCell={setCell} rowTotal={rowTotal} locked={locked} />
-            ))}
-            <Section label="Balance Sheet" span={months.length + 2} />
-            {bsRows.map((r) => (
-              <GridRow key={r.reportingAccountId} r={r} months={months} data={data} setCell={setCell} rowTotal={rowTotal} locked={locked} />
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
-  );
-}
-
-function Section({ label, span }: { label: string; span: number }) {
-  return (
-    <tr>
-      <td colSpan={span} className="micro-label bg-[color-mix(in_srgb,var(--color-text)_5%,transparent)] py-1.5">{label}</td>
-    </tr>
   );
 }
 
@@ -151,19 +149,22 @@ function GridRow({
 }) {
   return (
     <tr>
-      <td className="sticky left-0 whitespace-nowrap bg-surface">{r.name}</td>
+      <td className="sticky left-0 whitespace-nowrap bg-surface">
+        {r.acctNum ? <span className="text-muted">{r.acctNum} · </span> : null}
+        {r.name}
+      </td>
       {months.map((m) => (
         <td key={m} className="num p-0">
           <input
             className="w-[72px] bg-transparent px-1 py-1 text-right text-[12px] outline-none focus:bg-[color-mix(in_srgb,var(--color-accent)_8%,transparent)] [font-variant-numeric:tabular-nums]"
-            value={data[r.reportingAccountId]?.[m] ?? ""}
+            value={data[r.ledgerAccountId]?.[m] ?? ""}
             disabled={locked}
             inputMode="decimal"
-            onChange={(e) => setCell(r.reportingAccountId, m, e.target.value)}
+            onChange={(e) => setCell(r.ledgerAccountId, m, e.target.value)}
           />
         </td>
       ))}
-      <td className="num [font-variant-numeric:tabular-nums]">{formatCurrency(rowTotal(r.reportingAccountId))}</td>
+      <td className="num [font-variant-numeric:tabular-nums]">{formatCurrency(rowTotal(r.ledgerAccountId))}</td>
     </tr>
   );
 }

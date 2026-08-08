@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
-import { createBudget, saveBudgetLinesBulk, setBudgetStatus, deleteBudget } from "@/lib/pace/budgets";
+import { createBudget, saveBudgetLinesBulk, setBudgetStatus, deleteBudget, importQboBudget } from "@/lib/pace/budgets";
 import { upsertNote, draftNarrative } from "@/lib/pace/narratives";
 
 async function requireUser() {
@@ -34,11 +34,41 @@ export async function createBudgetAction(input: unknown) {
 
 export async function saveBudgetGridAction(
   budgetId: string,
-  lines: { reportingAccountId: string; monthly: Record<string, number> }[],
+  lines: { ledgerAccountId: string; monthly: Record<string, number> }[],
 ) {
   if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
   const res = await saveBudgetLinesBulk(budgetId, lines);
   revalidatePath(`/finance/budgets/${budgetId}`);
+  return res;
+}
+
+const importQboSchema = z.object({
+  entityId: z.string().min(1),
+  fiscalYear: z.coerce.number().int().min(2000).max(2100),
+  budgetName: z.string().optional(),
+});
+
+/** List the QBO budgets available for an entity (name + fiscal years covered). */
+export async function listQboBudgetsAction(entityId: string) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const { pullBudget } = await import("@/lib/pace/qbo");
+  const budgets = await pullBudget(entityId);
+  if (!budgets) return { ok: false as const, error: "QBO not connected for this entity, or the pull failed." };
+  return {
+    ok: true as const,
+    budgets: budgets.map((b) => ({
+      name: b.name,
+      years: Array.from(new Set(b.lines.map((l) => Number(l.month.slice(0, 4))))).sort((a, z) => z - a),
+    })),
+  };
+}
+
+export async function importQboBudgetAction(input: unknown) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const parsed = importQboSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  const res = await importQboBudget(parsed.data);
+  if (res.ok) revalidatePath("/finance/budgets");
   return res;
 }
 

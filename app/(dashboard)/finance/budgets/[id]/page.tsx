@@ -13,11 +13,11 @@ export default async function BudgetEditorPage({ params }: { params: Promise<{ i
   if (!grid) notFound();
 
   const rows: BudgetGridRow[] = grid.rows.map((r) => ({
-    reportingAccountId: r.reportingAccountId,
-    code: r.code,
+    ledgerAccountId: r.ledgerAccountId,
+    acctNum: r.acctNum,
     name: r.name,
-    statement: r.statement,
-    type: r.type,
+    section: r.section,
+    sectionLabel: r.sectionLabel,
     monthly: r.monthly,
   }));
 

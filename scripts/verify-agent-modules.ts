@@ -11,18 +11,13 @@ const ctx: AgentContext = { userId: "test-agent", role: "ADMIN", email: "test@ex
 async function main() {
   // Registry spans all modules.
   const names = AGENT_TOOLS.map((t) => t.name);
-  const expect = ["list_leads", "finance_list_reporting_coa", "finance_get_statement", "work_list_portfolios", "work_log_time", "marketing_list_evidence", "delivery_list_engagements"];
+  const expect = ["list_leads", "finance_get_statement", "finance_list_budgets", "work_list_portfolios", "work_log_time", "marketing_list_evidence", "delivery_list_engagements"];
   for (const n of expect) if (!names.includes(n)) throw new Error(`missing tool ${n}`);
-  // The manual-mapping tools are gone under the QBO-native rebuild.
-  for (const gone of ["finance_map_account", "finance_list_unmapped_accounts"]) {
+  // The reporting-COA mapping tools are gone under the QBO-native rebuild.
+  for (const gone of ["finance_map_account", "finance_list_unmapped_accounts", "finance_list_reporting_coa"]) {
     if (names.includes(gone)) throw new Error(`tool ${gone} should have been removed`);
   }
   console.log(`registry: ${AGENT_TOOLS.length} tools across modules`);
-
-  // Reporting COA read (still the budgeting dimension).
-  const coa = await TOOLS_BY_NAME.finance_list_reporting_coa.run({}, ctx);
-  console.log(`finance_list_reporting_coa → ${coa.count} accounts`);
-  if (!coa.ok || Number(coa.count) < 20) throw new Error("reporting COA not seeded");
 
   // Cash forecast read (works with no data).
   const cash = await TOOLS_BY_NAME.finance_get_cash_forecast.run({ horizon: "13week" }, ctx);

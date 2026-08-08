@@ -1162,24 +1162,6 @@ model LedgerConnection {
   entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
 }
 
-/// Firm-standard reporting chart of accounts, used as the budgeting dimension
-/// (budgets + budget-vs-actual roll up to these `type`s). Actuals are NOT mapped
-/// here — statements are rebuilt natively from QuickBooks' own AccountType /
-/// Classification (see lib/pace/qbo-taxonomy.ts).
-model ReportingAccount {
-  id          String        @id @default(cuid())
-  code        String?       @unique
-  name        String
-  statement   StatementKind
-  type        String // e.g. Revenue, COGS, OpEx, Asset, Liability, Equity
-  category    String?
-  subcategory String?
-  naturalSide NaturalSide
-  sortOrder   Int           @default(0)
-
-  budgetLines BudgetLine[]
-}
-
 /// A source account from an entity's ledger, carrying QuickBooks' descriptive
 /// metadata (AccountType/SubType/Classification + parent hierarchy) so PACE can
 /// rebuild the statements the way QBO organizes them — no manual COA mapping.
@@ -1197,9 +1179,10 @@ model LedgerAccount {
   active           Boolean  @default(true)
   createdAt        DateTime @default(now())
 
-  entity  Entity              @relation(fields: [entityId], references: [id], onDelete: Cascade)
-  lines   TrialBalanceLine[]
-  glLines GeneralLedgerLine[]
+  entity      Entity              @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  lines       TrialBalanceLine[]
+  glLines     GeneralLedgerLine[]
+  budgetLines BudgetLine[]
 
   @@unique([entityId, externalId])
   @@index([entityId])
@@ -1316,19 +1299,22 @@ model Budget {
   @@index([entityId])
 }
 
-/// One budget line per reporting account, holding twelve monthly amounts keyed
-/// by "YYYY-MM" in `monthly` (natural-side positive, like the statements).
+/// One budget line per QuickBooks (ledger) account, holding twelve monthly
+/// amounts keyed by "YYYY-MM" in `monthly` (natural-side positive, like the
+/// statements). Budgets plan natively at the QBO account level — no translation
+/// — so budget-vs-actual compares account-to-account.
 model BudgetLine {
-  id                 String @id @default(cuid())
-  budgetId           String
-  reportingAccountId String
-  monthly            Json   @default("{}") // { "2026-01": 12000, ... }
+  id              String @id @default(cuid())
+  budgetId        String
+  ledgerAccountId String
+  monthly         Json   @default("{}") // { "2026-01": 12000, ... }
 
-  budget           Budget           @relation(fields: [budgetId], references: [id], onDelete: Cascade)
-  reportingAccount ReportingAccount @relation(fields: [reportingAccountId], references: [id], onDelete: Cascade)
+  budget        Budget        @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  ledgerAccount LedgerAccount @relation(fields: [ledgerAccountId], references: [id], onDelete: Cascade)
 
-  @@unique([budgetId, reportingAccountId])
+  @@unique([budgetId, ledgerAccountId])
   @@index([budgetId])
+  @@index([ledgerAccountId])
 }
 
 /// A one-line explanation attached to a flagged variance (entity + statement

@@ -1,6 +1,5 @@
 import { prisma } from "@/lib/prisma";
 import { type AgentTool, safeRevalidate, str, usd } from "@/lib/agent/tool-kit";
-import { listReportingAccounts } from "@/lib/pace/coa";
 import { buildStatement, availableMonths } from "@/lib/pace/statements";
 import { buildDirectForecast, buildIndirectForecast } from "@/lib/pace/cash";
 import { qboConfigured, syncLedgerAccounts } from "@/lib/pace/qbo";
@@ -26,22 +25,6 @@ const listEntities: AgentTool = {
       ok: true,
       count: entities.length,
       entities: entities.map((e) => ({ id: e.id, name: e.name, kind: e.kind, provider: e.connection?.provider ?? "MANUAL", status: e.connection?.status ?? "disconnected" })),
-    };
-  },
-};
-
-const listReportingCoa: AgentTool = {
-  name: "finance_list_reporting_coa",
-  description:
-    "List the firm-standard reporting chart of accounts used as the budgeting dimension (budgets + budget-vs-actual roll up to these): code, name, statement (IS/BS), and type. Actuals are NOT mapped here — statements come straight from QuickBooks' own account types.",
-  mode: "read",
-  input_schema: { type: "object", properties: {} },
-  run: async () => {
-    const accts = await listReportingAccounts();
-    return {
-      ok: true,
-      count: accts.length,
-      accounts: accts.map((a) => ({ id: a.id, code: a.code, name: a.name, statement: a.statement, type: a.type })),
     };
   },
 };
@@ -158,7 +141,6 @@ const getCashForecast: AgentTool = {
 
 export const FINANCE_TOOLS: AgentTool[] = [
   listEntities,
-  listReportingCoa,
   getStatement,
   listBudgets,
   getCashForecast,
