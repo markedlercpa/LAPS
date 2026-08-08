@@ -1496,3 +1496,52 @@ model WeekClose {
   charges   Json // [{ portfolioId, portfolioName, consumedLaborCents, bookedUnusedCents, totalCents }]
   createdAt DateTime @default(now())
 }
+
+// ===========================================================================
+// FINANCE — Cash forecasting (13-week + 12-month). Firm-level, driven by data
+// internal to Pulse: signed/won proposal payment schedules (inflow), committed
+// capacity labor + director base (outflow), plus manual recurring/one-off lines
+// for everything not otherwise captured (rent, debt service, taxes, draws).
+// ===========================================================================
+
+enum CashFlowKind {
+  INFLOW
+  OUTFLOW
+}
+
+enum CashCadence {
+  ONE_TIME
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+/// Opening cash + minimum-cash buffer for the forecast. One row per scope
+/// ("firm" for now; per-entity later). Opening can be seeded from the latest TB.
+model CashPosition {
+  id           String   @id @default(cuid())
+  scope        String   @unique @default("firm")
+  openingCents Int      @default(0)
+  openingAsOf  DateTime @db.Date
+  minCashCents Int      @default(0)
+  updatedAt    DateTime @updatedAt
+}
+
+/// A manual cash line (recurring or one-off) layered onto the auto-derived
+/// flows. amountCents is per-occurrence, always positive; `kind` sets direction.
+model CashFlowLine {
+  id          String      @id @default(cuid())
+  label       String
+  kind        CashFlowKind
+  category    String?
+  amountCents Int
+  cadence     CashCadence @default(MONTHLY)
+  startDate   DateTime    @db.Date
+  endDate     DateTime?   @db.Date
+  active      Boolean     @default(true)
+  createdBy   String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([active])
+}
