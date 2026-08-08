@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { setCashConfig, addCashLine, deleteCashLine } from "@/lib/pace/cash";
+import { setAgingOverride } from "@/lib/pace/aging";
 import { CASH_CATEGORY_MAP } from "@/lib/pace/cash-taxonomy";
 
 async function requireUser() {
@@ -83,6 +84,29 @@ export async function addCashLineAction(input: unknown) {
 export async function deleteCashLineAction(id: string) {
   if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
   await deleteCashLine(id);
+  revalidatePath("/finance/cash");
+  revalidatePath("/finance/cash/assumptions");
+  return { ok: true as const };
+}
+
+const agingOverrideSchema = z.object({
+  itemKey: z.string().min(1),
+  kind: z.enum(["AR", "AP"]),
+  expectedDate: z.string().optional().nullable(),
+  excluded: z.coerce.boolean().default(false),
+});
+
+/** Save how one AR/AP open item spreads: a chosen date and/or exclude it. */
+export async function setAgingOverrideAction(input: unknown) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const parsed = agingOverrideSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  await setAgingOverride({
+    itemKey: parsed.data.itemKey,
+    kind: parsed.data.kind,
+    expectedDate: parsed.data.expectedDate && /^\d{4}-\d{2}-\d{2}$/.test(parsed.data.expectedDate) ? parsed.data.expectedDate : null,
+    excluded: parsed.data.excluded,
+  });
   revalidatePath("/finance/cash");
   revalidatePath("/finance/cash/assumptions");
   return { ok: true as const };

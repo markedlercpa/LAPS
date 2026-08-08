@@ -4,6 +4,7 @@ import { rateForBandWeek } from "@/lib/work/capacity";
 import { latestBankCashCents } from "@/lib/pace/statements";
 import { classifyAccount } from "@/lib/pace/qbo-taxonomy";
 import { qboConfigured, pullArAging, pullApAging, type AgingItem } from "@/lib/pace/qbo";
+import { agingItemKey, effectiveAgingDate, getAgingOverrides, type AgingKind, type AgingOverride } from "@/lib/pace/aging";
 import { CASH_CATEGORY_MAP, categoriesFor, type CashMode } from "@/lib/pace/cash-taxonomy";
 
 /**
@@ -216,11 +217,22 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
   // by due date (overdue lands in the first column, beyond-horizon drops off).
   // Auto-fed but overridable — manual assumption lines layer on top.
   const sources: CashSources = { qboConfigured: qboConfigured(), qboConnectedEntities: 0, arParsed: 0, apParsed: 0, arItems: 0, apItems: 0, arCents: 0, apCents: 0, wipCents: 0 };
-  const spreadAging = (items: AgingItem[], target: string, sign: 1 | -1): { items: number; cents: number } => {
+  // Per-item overrides from the Assumptions worktable: a chosen collection/
+  // payment date, or exclude. What you edit there is exactly what spreads here.
+  const spreadAging = (
+    items: AgingItem[],
+    target: string,
+    sign: 1 | -1,
+    kind: AgingKind,
+    entityId: string,
+    overrides: Map<string, AgingOverride>,
+  ): { items: number; cents: number } => {
     let placed = 0;
     let cents = 0;
     for (const it of items) {
-      const raw = it.dueDate || it.txnDate;
+      const ov = overrides.get(agingItemKey(kind, entityId, it));
+      if (ov?.excluded) continue;
+      const raw = effectiveAgingDate(it, ov);
       const d = raw ? new Date(`${raw}T00:00:00Z`) : h0;
       if (Number.isNaN(d.getTime())) continue;
       const when = d.getTime() < h0.getTime() ? h0 : d; // overdue → first period
@@ -235,12 +247,15 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
     return { items: placed, cents };
   };
   if (sources.qboConfigured) {
-    const conns = await prisma.ledgerConnection.findMany({ where: { provider: "QBO", status: "connected" }, select: { entityId: true } });
+    const [conns, overrides] = await Promise.all([
+      prisma.ledgerConnection.findMany({ where: { provider: "QBO", status: "connected" }, select: { entityId: true } }),
+      getAgingOverrides(),
+    ]);
     sources.qboConnectedEntities = conns.length;
     for (const c of conns) {
       const [ar, ap] = await Promise.all([pullArAging(c.entityId), pullApAging(c.entityId)]);
-      if (ar) { sources.arParsed += ar.length; const r = spreadAging(ar, "ar_collections", 1); sources.arItems += r.items; sources.arCents += r.cents; }
-      if (ap) { sources.apParsed += ap.length; const r = spreadAging(ap, "ap_payments", -1); sources.apItems += r.items; sources.apCents += r.cents; }
+      if (ar) { sources.arParsed += ar.length; const r = spreadAging(ar, "ar_collections", 1, "AR", c.entityId, overrides); sources.arItems += r.items; sources.arCents += r.cents; }
+      if (ap) { sources.apParsed += ap.length; const r = spreadAging(ap, "ap_payments", -1, "AP", c.entityId, overrides); sources.apItems += r.items; sources.apCents += r.cents; }
     }
   }
 

@@ -1617,3 +1617,17 @@ model CashFlowLine {
 
   @@index([active])
 }
+
+/// Per-item override of how a QBO AR/AP aging line spreads into the cash
+/// forecast. `itemKey` is a deterministic hash of the open item (kind + entity +
+/// name + doc# + amount) so overrides stick across re-pulls. expectedDate moves
+/// the item to a chosen collection/payment date; excluded drops it entirely.
+model CashAgingOverride {
+  id           String    @id @default(cuid())
+  itemKey      String    @unique
+  kind         String // "AR" | "AP"
+  expectedDate DateTime? @db.Date
+  excluded     Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}

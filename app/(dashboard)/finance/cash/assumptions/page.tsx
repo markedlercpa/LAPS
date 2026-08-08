@@ -2,12 +2,14 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { CashAssumptions } from "@/components/pace/cash-assumptions";
 import { CashLines, type CashLineRow } from "@/components/pace/cash-lines";
+import { CashAging } from "@/components/pace/cash-aging";
 import { getCashConfig, listCashLines, latestCashActualCents } from "@/lib/pace/cash";
+import { listAging } from "@/lib/pace/aging";
 
 export const dynamic = "force-dynamic";
 
 export default async function CashAssumptionsPage() {
-  const [config, lines, actual] = await Promise.all([getCashConfig(), listCashLines(), latestCashActualCents()]);
+  const [config, lines, actual, aging] = await Promise.all([getCashConfig(), listCashLines(), latestCashActualCents(), listAging()]);
   const today = new Date().toISOString().slice(0, 10);
 
   const values = {
@@ -49,7 +51,17 @@ export default async function CashAssumptionsPage() {
         qboAsOf={actual?.asOf ?? null}
       />
 
-      <div className="mt-8">
+      <div className="mt-10">
+        <h3 className="mb-1">AR / AP aging → forecast spread</h3>
+        <p className="mb-4 text-[13px] text-muted">
+          Live open invoices and bills from QuickBooks. Set an expected collection / payment date to control which
+          14-day or 13-week column each lands in, or uncheck Include to drop it. Blank uses the QBO due date; overdue
+          items land in the first period.
+        </p>
+        <CashAging data={aging} />
+      </div>
+
+      <div className="mt-10">
         <div className="micro-label mb-2">Manual cash lines</div>
         <CashLines rows={lineRows} />
       </div>
