@@ -4,26 +4,24 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 import { addCashLineAction, deleteCashLineAction } from "@/app/(dashboard)/finance/cash-actions";
+import { CASH_CATEGORIES, CASH_CATEGORY_MAP, CADENCE_LABELS } from "@/lib/pace/cash-taxonomy";
 
 export type CashLineRow = {
   id: string;
   label: string;
-  kind: "INFLOW" | "OUTFLOW";
+  category: string;
   amount: number; // dollars
   cadence: string;
   startDate: string;
   endDate: string | null;
-  category: string | null;
 };
 
-const CADENCE_LABELS: Record<string, string> = {
-  ONE_TIME: "One-time",
-  WEEKLY: "Weekly",
-  BIWEEKLY: "Bi-weekly",
-  MONTHLY: "Monthly",
-};
+const SECTIONS: { key: "RECEIPTS" | "DISBURSEMENTS" | "FINANCING"; label: string }[] = [
+  { key: "RECEIPTS", label: "Receipts" },
+  { key: "DISBURSEMENTS", label: "Disbursements" },
+  { key: "FINANCING", label: "Financing" },
+];
 
-/** Manual cash lines layered onto the auto-derived flows. */
 export function CashLines({ rows }: { rows: CashLineRow[] }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -35,12 +33,11 @@ export function CashLines({ rows }: { rows: CashLineRow[] }) {
     startTransition(async () => {
       const res = await addCashLineAction({
         label: fd.get("label"),
-        kind: fd.get("kind"),
+        category: fd.get("category"),
         amount: fd.get("amount"),
         cadence: fd.get("cadence"),
         startDate: fd.get("startDate"),
         endDate: fd.get("endDate") || undefined,
-        category: fd.get("category") || undefined,
       });
       if (res.ok) {
         router.refresh();
@@ -63,11 +60,16 @@ export function CashLines({ rows }: { rows: CashLineRow[] }) {
           <span className="micro-label">Label</span>
           <input name="label" className="input" required placeholder="Office rent" />
         </label>
-        <label className="field">
-          <span className="micro-label">Direction</span>
-          <select name="kind" className="input" defaultValue="OUTFLOW">
-            <option value="OUTFLOW">Outflow</option>
-            <option value="INFLOW">Inflow</option>
+        <label className="field min-w-[200px]">
+          <span className="micro-label">Category</span>
+          <select name="category" className="input" defaultValue="rent_occupancy" required>
+            {SECTIONS.map((s) => (
+              <optgroup key={s.key} label={s.label}>
+                {CASH_CATEGORIES.filter((c) => c.section === s.key).map((c) => (
+                  <option key={c.key} value={c.key}>{c.label}</option>
+                ))}
+              </optgroup>
+            ))}
           </select>
         </label>
         <label className="field">
@@ -93,13 +95,13 @@ export function CashLines({ rows }: { rows: CashLineRow[] }) {
       </form>
 
       {rows.length === 0 ? (
-        <p className="text-[13px] text-muted">No manual lines yet. Add recurring items (rent, debt service, taxes, owner draws) or one-offs.</p>
+        <p className="text-[13px] text-muted">No manual lines yet. Add recurring items (rent, debt service, taxes, owner draws, LOC) or one-offs — they populate the matching statement row.</p>
       ) : (
         <table className="table">
           <thead>
             <tr>
               <th>Label</th>
-              <th>Direction</th>
+              <th>Category</th>
               <th>Cadence</th>
               <th>From</th>
               <th>To</th>
@@ -108,21 +110,26 @@ export function CashLines({ rows }: { rows: CashLineRow[] }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td className="font-heading font-extrabold">{r.label}</td>
-                <td><span className={`tag ${r.kind === "INFLOW" ? "tag-accent" : "tag-neutral"}`}>{r.kind === "INFLOW" ? "In" : "Out"}</span></td>
-                <td className="text-muted">{CADENCE_LABELS[r.cadence] ?? r.cadence}</td>
-                <td className="text-muted">{r.startDate}</td>
-                <td className="text-muted">{r.endDate ?? "—"}</td>
-                <td className="num">${r.amount.toLocaleString()}</td>
-                <td className="text-right">
-                  <button className="btn btn-ghost btn-icon" disabled={pending} onClick={() => del(r.id)} aria-label="Delete" title="Delete">
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {rows.map((r) => {
+              const def = CASH_CATEGORY_MAP[r.category];
+              return (
+                <tr key={r.id}>
+                  <td className="font-heading font-extrabold">{r.label}</td>
+                  <td className="text-muted">{def?.label ?? r.category}</td>
+                  <td className="text-muted">{CADENCE_LABELS[r.cadence] ?? r.cadence}</td>
+                  <td className="text-muted">{r.startDate}</td>
+                  <td className="text-muted">{r.endDate ?? "—"}</td>
+                  <td className={`num ${def && def.sign < 0 ? "text-accent-700" : ""}`}>
+                    {def && def.sign < 0 ? "(" : ""}${r.amount.toLocaleString()}{def && def.sign < 0 ? ")" : ""}
+                  </td>
+                  <td className="text-right">
+                    <button className="btn btn-ghost btn-icon" disabled={pending} onClick={() => del(r.id)} aria-label="Delete" title="Delete">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

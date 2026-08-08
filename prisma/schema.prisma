@@ -1504,11 +1504,6 @@ model WeekClose {
 // for everything not otherwise captured (rent, debt service, taxes, draws).
 // ===========================================================================
 
-enum CashFlowKind {
-  INFLOW
-  OUTFLOW
-}
-
 enum CashCadence {
   ONE_TIME
   WEEKLY
@@ -1516,24 +1511,32 @@ enum CashCadence {
   MONTHLY
 }
 
-/// Opening cash + minimum-cash buffer for the forecast. One row per scope
-/// ("firm" for now; per-entity later). Opening can be seeded from the latest TB.
+/// Cash-forecast assumptions (one row, scope "firm"). Opening cash is pulled
+/// from the QB ledgers (latest balance-sheet cash) but can be overridden;
+/// the rest are the modeling assumptions surfaced on the Assumptions tab.
 model CashPosition {
-  id           String   @id @default(cuid())
-  scope        String   @unique @default("firm")
-  openingCents Int      @default(0)
-  openingAsOf  DateTime @db.Date
-  minCashCents Int      @default(0)
-  updatedAt    DateTime @updatedAt
+  id                String   @id @default(cuid())
+  scope             String   @unique @default("firm")
+  openingCents      Int      @default(0) // manual override; blank = use QB actual
+  openingAsOf       DateTime @db.Date
+  useQboOpening     Boolean  @default(true) // pull beginning cash from QB automatically
+  minCashCents      Int      @default(0)
+  locLimitCents     Int      @default(0)
+  locOpeningCents   Int      @default(0) // drawn balance at horizon start
+  dnaMonthlyCents   Int      @default(0) // 12-mo indirect: non-cash D&A add-back
+  capexMonthlyCents Int      @default(0) // 12-mo indirect: investing outflow
+  arDays            Int      @default(45) // 12-mo indirect: AR working-capital timing
+  apDays            Int      @default(30) // 12-mo indirect: AP working-capital timing
+  updatedAt         DateTime @updatedAt
 }
 
-/// A manual cash line (recurring or one-off) layered onto the auto-derived
-/// flows. amountCents is per-occurrence, always positive; `kind` sets direction.
+/// A manual cash line (recurring or one-off) mapped to a statement category
+/// row. amountCents is per-occurrence, always positive; the category
+/// (cash-taxonomy) sets its section + sign.
 model CashFlowLine {
   id          String      @id @default(cuid())
   label       String
-  kind        CashFlowKind
-  category    String?
+  category    String      @default("other_operating") // cash-taxonomy key
   amountCents Int
   cadence     CashCadence @default(MONTHLY)
   startDate   DateTime    @db.Date

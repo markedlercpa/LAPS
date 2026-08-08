@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { MetricRow } from "@/components/metric-row";
-import { CashSettings } from "@/components/pace/cash-settings";
-import { CashLines, type CashLineRow } from "@/components/pace/cash-lines";
-import { buildForecast, getCashPosition, listCashLines, latestCashActualCents, type Mode } from "@/lib/pace/cash";
+import { CashStatement } from "@/components/pace/cash-statement";
+import { CashIndirect } from "@/components/pace/cash-indirect";
+import { buildDirectForecast, buildIndirectForecast } from "@/lib/pace/cash";
+import { MODE_LABELS, type CashMode } from "@/lib/pace/cash-taxonomy";
 
 export const dynamic = "force-dynamic";
 
@@ -13,103 +14,76 @@ function usd(cents: number): string {
 
 export default async function CashPage({ searchParams }: { searchParams: Promise<{ mode?: string }> }) {
   const sp = await searchParams;
-  const mode: Mode = sp.mode === "monthly" ? "monthly" : "weekly";
-
-  const [forecast, position, lines, actual] = await Promise.all([
-    buildForecast(mode),
-    getCashPosition(),
-    listCashLines(),
-    latestCashActualCents(),
-  ]);
-
-  const lineRows: CashLineRow[] = lines.map((l) => ({
-    id: l.id,
-    label: l.label,
-    kind: l.kind,
-    amount: l.amountCents / 100,
-    cadence: l.cadence,
-    startDate: l.startDate.toISOString().slice(0, 10),
-    endDate: l.endDate ? l.endDate.toISOString().slice(0, 10) : null,
-    category: l.category,
-  }));
-
-  const today = new Date().toISOString().slice(0, 10);
+  const mode: CashMode = sp.mode === "monthly" ? "monthly" : sp.mode === "daily" ? "daily" : "weekly";
 
   return (
     <div>
       <PageHeader
         eyebrow="Finance — Cash"
         title="Cash forecast"
-        description="Firm-level cash roll from data internal to Pulse: signed/won proposal payments (in), committed capacity labor + director base (out), plus your manual lines. Beginning rolls to ending each period; endings under the buffer are flagged."
+        description="Firm-level cash roll off data internal to Pulse. Beginning cash pulls from the QB ledgers; proposal payments + committed labor auto-feed, layered with your assumptions."
       >
-        <Link href="/finance/cash?mode=weekly" className={`btn ${mode === "weekly" ? "btn-primary" : "btn-secondary"}`}>13-week</Link>
-        <Link href="/finance/cash?mode=monthly" className={`btn ${mode === "monthly" ? "btn-primary" : "btn-secondary"}`}>12-month</Link>
+        {(["daily", "weekly", "monthly"] as CashMode[]).map((m) => (
+          <Link key={m} href={`/finance/cash?mode=${m}`} className={`btn ${mode === m ? "btn-primary" : "btn-secondary"}`}>
+            {MODE_LABELS[m]}
+          </Link>
+        ))}
+        <Link href="/finance/cash/assumptions" className="btn btn-ghost">Assumptions</Link>
       </PageHeader>
 
+      {mode === "monthly" ? await MonthlyView() : await DirectView(mode)}
+    </div>
+  );
+}
+
+async function DirectView(mode: "daily" | "weekly") {
+  const f = await buildDirectForecast(mode);
+  const endingLast = f.ending[f.ending.length - 1] ?? f.opening.cents;
+  const lowestEnding = Math.min(...(f.ending.length ? f.ending : [f.opening.cents]));
+
+  return (
+    <>
       <MetricRow
         metrics={[
-          { label: mode === "weekly" ? "Cash in 13 weeks" : "Cash in 12 months", value: usd(forecast.totals.endingCents) },
-          { label: "Lowest ending", value: usd(forecast.lowestEndingCents), accent: forecast.lowestEndingCents < forecast.minCashCents },
-          { label: "Min-cash buffer", value: usd(forecast.minCashCents) },
-          {
-            label: "First shortfall",
-            value: forecast.firstBreachKey ?? "None",
-            accent: !!forecast.firstBreachKey,
-            note: forecast.firstBreachKey ? "ending below buffer" : "stays above buffer",
-          },
+          { label: "Beginning cash", value: usd(f.opening.cents), note: f.opening.auto ? `QB ledger${f.opening.asOf ? ` · ${f.opening.asOf}` : ""}` : "manual" },
+          { label: mode === "daily" ? "Ending (day 14)" : "Ending (week 13)", value: usd(endingLast) },
+          { label: "Lowest ending", value: usd(lowestEnding), accent: lowestEnding < f.minThreshold },
+          { label: "Lowest liquidity", value: usd(Math.min(...f.loc.totalLiquidity)) },
         ]}
       />
-
-      <div className="mt-6 overflow-x-auto">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Period</th>
-              <th className="num">Beginning</th>
-              <th className="num">Proposals +</th>
-              <th className="num">Other in +</th>
-              <th className="num">Labor −</th>
-              <th className="num">Director −</th>
-              <th className="num">Other out −</th>
-              <th className="num">Ending</th>
-            </tr>
-          </thead>
-          <tbody>
-            {forecast.rows.map((r) => (
-              <tr key={r.key} className={r.breach ? "bg-[color:color-mix(in_srgb,var(--color-accent)_10%,transparent)]" : ""}>
-                <td className="font-heading font-extrabold">{r.label}</td>
-                <td className="num text-muted">{usd(r.beginningCents)}</td>
-                <td className="num">{r.sources.proposalsCents ? usd(r.sources.proposalsCents) : "—"}</td>
-                <td className="num">{r.sources.manualInCents ? usd(r.sources.manualInCents) : "—"}</td>
-                <td className="num">{r.sources.laborCents ? usd(r.sources.laborCents) : "—"}</td>
-                <td className="num">{r.sources.directorCents ? usd(r.sources.directorCents) : "—"}</td>
-                <td className="num">{r.sources.manualOutCents ? usd(r.sources.manualOutCents) : "—"}</td>
-                <td className={`num font-heading font-extrabold ${r.breach ? "text-accent-700" : ""}`}>{usd(r.endingCents)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="mt-6">
+        <CashStatement f={f} />
       </div>
+    </>
+  );
+}
 
-      <p className="mt-2 text-[12px] text-muted">
-        Opening cash {usd(forecast.openingCents)}. Inflows total {usd(forecast.totals.inflowCents)}, outflows{" "}
-        {usd(forecast.totals.outflowCents)} across the {mode === "weekly" ? "13 weeks" : "12 months"}.
-      </p>
+async function MonthlyView() {
+  const f = await buildIndirectForecast();
+  const endingLast = f.ending[f.ending.length - 1] ?? f.opening.cents;
+  const revenue = f.pnl.find((r) => r.key === "revenue")?.values.reduce((s, x) => s + x, 0) ?? 0;
+  const ni = f.pnl.find((r) => r.key === "net_income")?.values.reduce((s, x) => s + x, 0) ?? 0;
+  const netChange = f.cash.find((r) => r.key === "net_change")?.values.reduce((s, x) => s + x, 0) ?? 0;
 
-      <div className="mt-8">
-        <div className="micro-label mb-2">Opening cash & buffer</div>
-        <CashSettings
-          opening={(position?.openingCents ?? 0) / 100}
-          openingAsOf={position?.openingAsOf ? position.openingAsOf.toISOString().slice(0, 10) : today}
-          minCash={(position?.minCashCents ?? 0) / 100}
-          actualSuggestion={actual != null ? Math.round(actual / 100) : null}
-        />
+  return (
+    <>
+      <MetricRow
+        metrics={[
+          { label: "Beginning cash", value: usd(f.opening.cents), note: f.opening.auto ? "QB ledger" : "manual" },
+          { label: "12-mo revenue (budget)", value: usd(revenue) },
+          { label: "12-mo net income", value: usd(ni), accent: ni < 0 },
+          { label: "Ending cash (mo 12)", value: usd(endingLast), accent: endingLast < 0 },
+        ]}
+      />
+      {revenue === 0 && (
+        <p className="mt-3 text-[13px] text-accent-700">
+          No budget figures found — the 12-month P&L is budget-driven. Create/lock a budget in Finance → Budgets to populate it.
+        </p>
+      )}
+      <p className="mt-2 text-[12px] text-muted">Net change in cash over 12 months: {usd(netChange)}.</p>
+      <div className="mt-6">
+        <CashIndirect f={f} />
       </div>
-
-      <div className="mt-8">
-        <div className="micro-label mb-2">Manual cash lines</div>
-        <CashLines rows={lineRows} />
-      </div>
-    </div>
+    </>
   );
 }

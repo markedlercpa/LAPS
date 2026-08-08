@@ -2,278 +2,456 @@ import { prisma } from "@/lib/prisma";
 import { isoWeekOf, isoWeekStart } from "@/lib/work-taxonomy";
 import { rateForBandWeek } from "@/lib/work/capacity";
 import { buildStatement, availableMonths } from "@/lib/pace/statements";
+import { CASH_CATEGORY_MAP, categoriesFor, type CashMode } from "@/lib/pace/cash-taxonomy";
 
 /**
- * Cash forecasting — 13-week (weekly) and 12-month (monthly) models, firm-level,
- * off data internal to Pulse:
- *   Inflows  = signed/won proposal payment schedules (ProposalPayment.dueOn)
- *   Outflows = committed capacity labor (booked hours × loaded rate) + director
- *              base (annual, prorated) + manual OUTFLOW lines
- *   ± manual lines of either direction (rent, debt service, taxes, draws, …)
- * Beginning cash rolls to ending each bucket; endings under the min-cash buffer
- * are flagged.
+ * Cash forecasting — three models, all firm-level, off data internal to Pulse:
+ *   • 14-day daily   (direct, categorized)
+ *   • 13-week weekly (direct, categorized)
+ *   • 12-month       (indirect 3-statement: P&L from budgets → EBITDA → net
+ *                     income → GAAP cash flow)
+ *
+ * Beginning cash is pulled automatically from the QB ledgers (latest
+ * balance-sheet cash). Category rows are auto-fed where Pulse has the data
+ * (signed/won proposal payments → project receipts; committed capacity labor +
+ * director base → payroll) and layered with manual assumption lines.
  */
 
-export type Mode = "weekly" | "monthly";
-
-export type Bucket = { key: string; label: string; start: Date; end: Date };
-export type ForecastRow = {
-  key: string;
-  label: string;
-  beginningCents: number;
-  inflowCents: number;
-  outflowCents: number;
-  endingCents: number;
-  breach: boolean;
-  sources: { proposalsCents: number; manualInCents: number; laborCents: number; directorCents: number; manualOutCents: number };
-};
-export type Forecast = {
-  mode: Mode;
-  openingCents: number;
-  minCashCents: number;
-  rows: ForecastRow[];
-  totals: { inflowCents: number; outflowCents: number; endingCents: number };
-  lowestEndingCents: number;
-  firstBreachKey: string | null;
-};
-
-// ── Bucket builders ──────────────────────────────────────────────────────────
+// ── Date / bucket helpers ────────────────────────────────────────────────────
+function ymd(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+function mmddyy(d: Date): string {
+  return d.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "2-digit", timeZone: "UTC" });
+}
 function daysInMonth(y: number, m: number): number {
   return new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
 }
 function addMonths(d: Date, k: number): Date {
   const y = d.getUTCFullYear();
   const m = d.getUTCMonth();
-  const day = Math.min(d.getUTCDate(), daysInMonth(y, m + k));
-  return new Date(Date.UTC(y, m + k, day));
+  return new Date(Date.UTC(y, m + k, Math.min(d.getUTCDate(), daysInMonth(y, m + k))));
+}
+function todayUtc(): Date {
+  const n = new Date();
+  return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()));
 }
 
-function weeklyBuckets(n: number): Bucket[] {
+export type Column = { num: number; date: string; sub: string; key: string };
+
+function dailyColumns(n: number): Column[] {
+  const start = todayUtc();
+  return Array.from({ length: n }, (_, i) => {
+    const d = new Date(start);
+    d.setUTCDate(start.getUTCDate() + i);
+    return { num: i + 1, date: mmddyy(d), sub: d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" }), key: ymd(d) };
+  });
+}
+function weeklyColumns(n: number): Column[] {
   const start = isoWeekStart(isoWeekOf(new Date()));
   return Array.from({ length: n }, (_, i) => {
-    const s = new Date(start);
-    s.setUTCDate(start.getUTCDate() + i * 7);
-    const e = new Date(s);
-    e.setUTCDate(s.getUTCDate() + 6);
-    return { key: isoWeekOf(s), label: isoWeekOf(s).replace(/^\d{4}-/, ""), start: s, end: e };
+    const mon = new Date(start);
+    mon.setUTCDate(start.getUTCDate() + i * 7);
+    const fri = new Date(mon);
+    fri.setUTCDate(mon.getUTCDate() + 4);
+    return { num: i + 1, date: mmddyy(fri), sub: mmddyy(mon), key: isoWeekOf(mon) };
   });
 }
-function monthlyBuckets(n: number): Bucket[] {
-  const now = new Date();
-  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+function monthlyColumns(n: number): Column[] {
+  const first = new Date(Date.UTC(todayUtc().getUTCFullYear(), todayUtc().getUTCMonth(), 1));
   return Array.from({ length: n }, (_, i) => {
     const s = addMonths(first, i);
-    const e = new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth() + 1, 0));
     const key = `${s.getUTCFullYear()}-${String(s.getUTCMonth() + 1).padStart(2, "0")}`;
-    return { key, label: s.toLocaleDateString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" }), start: s, end: e };
+    return { num: i + 1, date: s.toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }), sub: "", key };
   });
 }
 
-function bucketIndexForDate(buckets: Bucket[], d: Date): number {
-  const t = d.getTime();
-  for (let i = 0; i < buckets.length; i++) {
-    if (t >= buckets[i].start.getTime() && t <= buckets[i].end.getTime() + 86_399_000) return i;
-  }
-  return -1;
+/** Which column index a date falls in, by mode. -1 if outside the horizon. */
+function columnIndexForDate(cols: Column[], mode: CashMode, d: Date): number {
+  if (mode === "daily") return cols.findIndex((c) => c.key === ymd(d));
+  if (mode === "weekly") return cols.findIndex((c) => c.key === isoWeekOf(d));
+  const mk = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  return cols.findIndex((c) => c.key === mk);
 }
 
-// ── Manual line occurrence expansion ────────────────────────────────────────
-type LineRow = { kind: "INFLOW" | "OUTFLOW"; amountCents: number; cadence: string; startDate: Date; endDate: Date | null };
-
-function occurrences(line: LineRow, horizonStart: Date, horizonEnd: Date): Date[] {
+// ── Manual-line occurrence expansion ─────────────────────────────────────────
+type LineLite = { category: string; amountCents: number; cadence: string; startDate: Date; endDate: Date | null };
+function occurrences(line: LineLite, h0: Date, hN: Date): Date[] {
   const out: Date[] = [];
-  const end = line.endDate && line.endDate.getTime() < horizonEnd.getTime() ? line.endDate : horizonEnd;
+  const end = line.endDate && line.endDate.getTime() < hN.getTime() ? line.endDate : hN;
   if (line.cadence === "ONE_TIME") {
-    if (line.startDate >= horizonStart && line.startDate <= horizonEnd) out.push(line.startDate);
+    if (line.startDate >= h0 && line.startDate <= hN) out.push(line.startDate);
     return out;
   }
-  const stepDays = line.cadence === "WEEKLY" ? 7 : line.cadence === "BIWEEKLY" ? 14 : 0;
+  const step = line.cadence === "WEEKLY" ? 7 : line.cadence === "BIWEEKLY" ? 14 : 0;
   let cur = new Date(line.startDate);
   let guard = 0;
   while (cur.getTime() <= end.getTime() && guard++ < 800) {
-    if (cur >= horizonStart) out.push(new Date(cur));
-    cur = stepDays ? new Date(cur.getTime() + stepDays * 86_400_000) : addMonths(cur, 1);
+    if (cur >= h0) out.push(new Date(cur));
+    cur = step ? new Date(cur.getTime() + step * 86_400_000) : addMonths(cur, 1);
   }
   return out;
 }
 
-// ── The forecast ─────────────────────────────────────────────────────────────
-export async function buildForecast(mode: Mode): Promise<Forecast> {
-  const buckets = mode === "weekly" ? weeklyBuckets(13) : monthlyBuckets(12);
-  const h0 = buckets[0].start;
-  const hN = buckets[buckets.length - 1].end;
-  const n = buckets.length;
+// ── Opening cash (auto from QB ledgers) ──────────────────────────────────────
+export async function latestCashActualCents(): Promise<{ cents: number; asOf: string } | null> {
+  const months = await availableMonths();
+  if (months.length === 0) return null;
+  const bs = await buildStatement(null, months[0], "BS");
+  const cash = bs.lines.find((l) => l.code === "1000");
+  if (!cash) return null;
+  return { cents: Math.round(cash.amount * 100), asOf: months[0].slice(0, 10) };
+}
+
+async function effectiveOpening(config: Awaited<ReturnType<typeof getCashConfig>>): Promise<{ cents: number; auto: boolean; asOf: string | null }> {
+  if (!config || config.useQboOpening) {
+    const actual = await latestCashActualCents();
+    if (actual) return { cents: actual.cents, auto: true, asOf: actual.asOf };
+  }
+  return { cents: config?.openingCents ?? 0, auto: false, asOf: config?.openingAsOf ? ymd(config.openingAsOf) : null };
+}
+
+// ── Direct forecast (14-day / 13-week) ───────────────────────────────────────
+export type StatementRow = { key: string; label: string; values: number[]; total: number };
+export type StatementGroup = { title: string; rows: StatementRow[]; subtotalLabel: string; subtotal: number[]; subtotalTotal: number };
+export type DirectForecast = {
+  mode: CashMode;
+  columns: Column[];
+  opening: { cents: number; auto: boolean; asOf: string | null };
+  beginning: number[];
+  groups: StatementGroup[]; // RECEIPTS, DISBURSEMENTS
+  netOperating: StatementRow;
+  financing: StatementGroup;
+  ending: number[];
+  loc: { balance: number[]; availability: number[]; totalLiquidity: number[]; limitCents: number };
+  minThreshold: number;
+  cushion: number[];
+};
+
+const sum = (a: number[]) => a.reduce((s, x) => s + x, 0);
+
+export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<DirectForecast> {
+  const columns = mode === "daily" ? dailyColumns(14) : weeklyColumns(13);
+  const n = columns.length;
+  const h0 = mode === "daily" ? new Date(`${columns[0].key}T00:00:00Z`) : isoWeekStart(columns[0].key);
+  const hN = mode === "daily" ? new Date(`${columns[n - 1].key}T23:59:59Z`) : (() => { const m = isoWeekStart(columns[n - 1].key); m.setUTCDate(m.getUTCDate() + 6); return m; })();
 
   const zero = () => new Array(n).fill(0);
-  const proposalsCents = zero();
-  const manualInCents = zero();
-  const laborCents = zero();
-  const directorCents = zero();
-  const manualOutCents = zero();
+  const cat: Record<string, number[]> = {};
+  for (const c of CASH_CATEGORY_MAP ? Object.keys(CASH_CATEGORY_MAP) : []) cat[c] = zero();
 
-  const [position, lines, payments, bookings, portfolios] = await Promise.all([
-    prisma.cashPosition.findUnique({ where: { scope: "firm" } }),
+  const [config, lines, payments, bookings, portfolios] = await Promise.all([
+    getCashConfig(),
     prisma.cashFlowLine.findMany({ where: { active: true } }),
     prisma.proposalPayment.findMany({
       where: { proposal: { status: { in: ["SIGNED", "WON"] } }, dueOn: { not: null } },
       select: { amount: true, dueOn: true },
     }),
-    prisma.capacityBooking.findMany({
-      where: {
-        status: { in: ["CONFIRMED", "CONSUMED_CLOSED"] },
-        ...(mode === "weekly" ? { isoWeek: { in: buckets.map((b) => b.key) } } : {}),
-      },
-      include: { resource: { select: { costExempt: true } } },
-    }),
-    prisma.portfolio.findMany({ where: { active: true }, select: { directorCostCentsAnnual: true } }),
+    mode === "weekly"
+      ? prisma.capacityBooking.findMany({
+          where: { isoWeek: { in: columns.map((c) => c.key) }, status: { in: ["CONFIRMED", "CONSUMED_CLOSED"] } },
+          include: { resource: { select: { costExempt: true } } },
+        })
+      : Promise.resolve([] as never[]),
+    mode === "weekly" ? prisma.portfolio.findMany({ where: { active: true }, select: { directorCostCentsAnnual: true } }) : Promise.resolve([] as { directorCostCentsAnnual: number }[]),
   ]);
 
-  // Manual lines.
+  // Manual lines → their category row (signed).
   for (const l of lines) {
-    const occ = occurrences(
-      { kind: l.kind, amountCents: l.amountCents, cadence: l.cadence, startDate: l.startDate, endDate: l.endDate },
-      h0,
-      hN,
-    );
-    for (const d of occ) {
-      const i = bucketIndexForDate(buckets, d);
-      if (i < 0) continue;
-      if (l.kind === "INFLOW") manualInCents[i] += l.amountCents;
-      else manualOutCents[i] += l.amountCents;
+    const def = CASH_CATEGORY_MAP[l.category];
+    if (!def) continue;
+    for (const d of occurrences({ category: l.category, amountCents: l.amountCents, cadence: l.cadence, startDate: l.startDate, endDate: l.endDate }, h0, hN)) {
+      const i = columnIndexForDate(columns, mode, d);
+      if (i >= 0) cat[l.category][i] += l.amountCents * def.sign;
     }
   }
 
-  // Proposal scheduled payments (inflow).
+  // Auto: signed/won proposal payments → QofE & one-time project receipts.
   for (const p of payments) {
     if (!p.dueOn) continue;
     const d = new Date(`${p.dueOn.slice(0, 10)}T00:00:00Z`);
     if (Number.isNaN(d.getTime())) continue;
-    const i = bucketIndexForDate(buckets, d);
-    if (i < 0) continue;
-    proposalsCents[i] += Math.round(Number(p.amount) * 100);
+    const i = columnIndexForDate(columns, mode, d);
+    if (i >= 0) cat.qofe_projects[i] += Math.round(Number(p.amount) * 100);
   }
 
-  // Committed capacity labor (booked hours × loaded rate; directors $0).
-  const rateCache = new Map<string, number>();
-  for (const b of bookings) {
-    const booked = Number(b.hoursBooked);
-    if (booked <= 0 || b.resource.costExempt) continue;
-    // Map the booking's week to a bucket by its Monday date.
-    const monday = isoWeekStart(b.isoWeek);
-    const i = bucketIndexForDate(buckets, monday);
-    if (i < 0) continue;
-    let rate = b.rateCentsSnapshot ?? -1;
-    if (rate < 0) {
-      const key = `${b.roleBandId}|${b.isoWeek}`;
-      if (rateCache.has(key)) rate = rateCache.get(key)!;
-      else {
-        const r = await rateForBandWeek(b.roleBandId, b.isoWeek);
-        rate = r?.loadedRateCents ?? 0;
+  // Auto (weekly only): committed capacity labor + director base → Payroll.
+  if (mode === "weekly") {
+    const rateCache = new Map<string, number>();
+    for (const b of bookings as { hoursBooked: unknown; resource: { costExempt: boolean }; rateCentsSnapshot: number | null; roleBandId: string; isoWeek: string }[]) {
+      const booked = Number(b.hoursBooked);
+      if (booked <= 0 || b.resource.costExempt) continue;
+      const i = columns.findIndex((c) => c.key === b.isoWeek);
+      if (i < 0) continue;
+      let rate = b.rateCentsSnapshot ?? -1;
+      if (rate < 0) {
+        const key = `${b.roleBandId}|${b.isoWeek}`;
+        rate = rateCache.get(key) ?? (await rateForBandWeek(b.roleBandId, b.isoWeek))?.loadedRateCents ?? 0;
         rateCache.set(key, rate);
       }
+      cat.payroll[i] += -Math.round(booked * rate); // disbursement (negative)
     }
-    laborCents[i] += Math.round(booked * rate);
+    const directorAnnual = portfolios.reduce((s, p) => s + p.directorCostCentsAnnual, 0);
+    const perWeek = Math.round(directorAnnual / 52);
+    for (let i = 0; i < n; i++) cat.payroll[i] += -perWeek;
   }
 
-  // Director base — annual, prorated per bucket (÷52 weekly, ÷12 monthly).
-  const directorAnnual = portfolios.reduce((s, p) => s + p.directorCostCentsAnnual, 0);
-  const perBucketDirector = mode === "weekly" ? Math.round(directorAnnual / 52) : Math.round(directorAnnual / 12);
-  for (let i = 0; i < n; i++) directorCents[i] = perBucketDirector;
+  const mkGroup = (title: string, section: "RECEIPTS" | "DISBURSEMENTS" | "FINANCING", subtotalLabel: string): StatementGroup => {
+    const rows: StatementRow[] = categoriesFor(section).map((c) => ({ key: c.key, label: c.label, values: cat[c.key], total: sum(cat[c.key]) }));
+    const subtotal = zero();
+    for (const r of rows) for (let i = 0; i < n; i++) subtotal[i] += r.values[i];
+    return { title, rows, subtotalLabel, subtotal, subtotalTotal: sum(subtotal) };
+  };
+  const receipts = mkGroup("RECEIPTS", "RECEIPTS", "Total Receipts");
+  const disbursements = mkGroup("DISBURSEMENTS", "DISBURSEMENTS", "Total Disbursements");
+  const financing = mkGroup("FINANCING", "FINANCING", "Net Financing Cash Flow");
 
-  // Roll.
-  const openingCents = position?.openingCents ?? 0;
-  const minCashCents = position?.minCashCents ?? 0;
-  const rows: ForecastRow[] = [];
-  let running = openingCents;
-  let lowestEnding = Infinity;
-  let firstBreachKey: string | null = null;
+  const netOperatingValues = zero();
+  for (let i = 0; i < n; i++) netOperatingValues[i] = receipts.subtotal[i] + disbursements.subtotal[i];
+  const netOperating: StatementRow = { key: "net_op", label: "Net Operating Cash Flow", values: netOperatingValues, total: sum(netOperatingValues) };
+
+  // Roll cash + LOC.
+  const opening = await effectiveOpening(config);
+  const beginning = zero();
+  const ending = zero();
+  const locBalance = zero();
+  const locAvail = zero();
+  const totalLiquidity = zero();
+  const cushion = zero();
+  const limit = config?.locLimitCents ?? 0;
+  const minThreshold = config?.minCashCents ?? 0;
+  const draws = cat.loc_draws;
+  const repay = cat.loc_repayments; // negative values
+  let locPrev = config?.locOpeningCents ?? 0;
   for (let i = 0; i < n; i++) {
-    const beginning = running;
-    const inflow = proposalsCents[i] + manualInCents[i];
-    const outflow = laborCents[i] + directorCents[i] + manualOutCents[i];
-    const ending = beginning + inflow - outflow;
-    running = ending;
-    const breach = ending < minCashCents;
-    if (breach && firstBreachKey == null) firstBreachKey = buckets[i].key;
-    lowestEnding = Math.min(lowestEnding, ending);
-    rows.push({
-      key: buckets[i].key,
-      label: buckets[i].label,
-      beginningCents: beginning,
-      inflowCents: inflow,
-      outflowCents: outflow,
-      endingCents: ending,
-      breach,
-      sources: {
-        proposalsCents: proposalsCents[i],
-        manualInCents: manualInCents[i],
-        laborCents: laborCents[i],
-        directorCents: directorCents[i],
-        manualOutCents: manualOutCents[i],
-      },
-    });
+    beginning[i] = i === 0 ? opening.cents : ending[i - 1];
+    ending[i] = beginning[i] + netOperating.values[i] + financing.subtotal[i];
+    locPrev = locPrev + draws[i] + repay[i]; // repay negative → reduces balance
+    locBalance[i] = locPrev;
+    locAvail[i] = limit - locPrev;
+    totalLiquidity[i] = ending[i] + locAvail[i];
+    cushion[i] = totalLiquidity[i] - minThreshold;
   }
 
   return {
     mode,
-    openingCents,
-    minCashCents,
-    rows,
-    totals: {
-      inflowCents: rows.reduce((s, r) => s + r.inflowCents, 0),
-      outflowCents: rows.reduce((s, r) => s + r.outflowCents, 0),
-      endingCents: rows.length ? rows[rows.length - 1].endingCents : openingCents,
-    },
-    lowestEndingCents: rows.length ? lowestEnding : openingCents,
-    firstBreachKey,
+    columns,
+    opening,
+    beginning,
+    groups: [receipts, disbursements],
+    netOperating,
+    financing,
+    ending,
+    loc: { balance: locBalance, availability: locAvail, totalLiquidity, limitCents: limit },
+    minThreshold,
+    cushion,
+  };
+}
+
+// ── 12-month indirect 3-statement (P&L from budgets) ─────────────────────────
+export type IndirectRow = { key: string; label: string; values: number[]; strong?: boolean; sub?: boolean };
+export type IndirectForecast = {
+  columns: Column[];
+  opening: { cents: number; auto: boolean; asOf: string | null };
+  pnl: IndirectRow[];
+  cash: IndirectRow[];
+  ending: number[];
+};
+
+/** Monthly P&L from the winning budget per entity/fiscal-year (LOCKED else latest). */
+async function budgetPnlMonthly(monthKeys: string[]): Promise<Record<string, { revenue: number; cogs: number; opex: number; dna: number; interest: number; tax: number }>> {
+  const [accounts, budgets] = await Promise.all([
+    prisma.reportingAccount.findMany({ select: { id: true, type: true, code: true } }),
+    prisma.budget.findMany({ select: { id: true, entityId: true, fiscalYear: true, status: true, createdAt: true } }),
+  ]);
+  const acct = new Map(accounts.map((a) => [a.id, a]));
+
+  // Winning budget per (entity, fiscalYear): LOCKED first, then most recent.
+  const winners = new Map<string, { id: string; locked: boolean; createdAt: Date }>();
+  for (const b of budgets) {
+    const k = `${b.entityId}|${b.fiscalYear}`;
+    const cur = winners.get(k);
+    const locked = b.status === "LOCKED";
+    if (!cur || (locked && !cur.locked) || (locked === cur.locked && b.createdAt > cur.createdAt)) {
+      winners.set(k, { id: b.id, locked, createdAt: b.createdAt });
+    }
+  }
+  const winnerIds = new Set(Array.from(winners.values()).map((w) => w.id));
+  const lines = winnerIds.size
+    ? await prisma.budgetLine.findMany({ where: { budgetId: { in: Array.from(winnerIds) } }, select: { reportingAccountId: true, monthly: true } })
+    : [];
+
+  const out: Record<string, { revenue: number; cogs: number; opex: number; dna: number; interest: number; tax: number }> = {};
+  for (const mk of monthKeys) out[mk] = { revenue: 0, cogs: 0, opex: 0, dna: 0, interest: 0, tax: 0 };
+  for (const l of lines) {
+    const a = acct.get(l.reportingAccountId);
+    if (!a) continue;
+    const monthly = (l.monthly ?? {}) as Record<string, number>;
+    for (const mk of monthKeys) {
+      const cents = Math.round((Number(monthly[mk]) || 0) * 100);
+      if (!cents) continue;
+      const b = out[mk];
+      if (a.type === "Revenue") b.revenue += cents;
+      else if (a.type === "COGS") b.cogs += cents;
+      else if (a.type === "OpEx") b.opex += cents;
+      else if (a.type === "OtherExpense") {
+        if (a.code === "7100") b.dna += cents;
+        else if (a.code === "7000") b.interest += cents;
+        else if (a.code === "7900") b.tax += cents;
+      }
+    }
+  }
+  return out;
+}
+
+export async function buildIndirectForecast(): Promise<IndirectForecast> {
+  const columns = monthlyColumns(12);
+  const n = columns.length;
+  const keys = columns.map((c) => c.key);
+  const zero = () => new Array(n).fill(0);
+
+  const [config, pnlByMonth, lines] = await Promise.all([
+    getCashConfig(),
+    budgetPnlMonthly(keys),
+    prisma.cashFlowLine.findMany({ where: { active: true, category: { in: ["loc_draws", "loc_repayments", "term_debt_service", "owner_distributions"] } } }),
+  ]);
+
+  const revenue = zero(), cogs = zero(), grossProfit = zero(), opex = zero(), ebitda = zero();
+  const dna = zero(), interest = zero(), tax = zero(), netIncome = zero();
+  keys.forEach((mk, i) => {
+    const p = pnlByMonth[mk];
+    revenue[i] = p.revenue;
+    cogs[i] = p.cogs;
+    grossProfit[i] = p.revenue - p.cogs;
+    opex[i] = p.opex;
+    ebitda[i] = grossProfit[i] - p.opex;
+    dna[i] = p.dna || (config?.dnaMonthlyCents ?? 0);
+    interest[i] = p.interest;
+    tax[i] = p.tax;
+    netIncome[i] = ebitda[i] - dna[i] - interest[i] - tax[i];
+  });
+
+  // Working-capital changes from AR/AP timing assumptions.
+  const arDays = config?.arDays ?? 45;
+  const apDays = config?.apDays ?? 30;
+  const arBal = revenue.map((r) => Math.round((r * arDays) / 30));
+  const apBal = keys.map((_, i) => Math.round(((cogs[i] + opex[i]) * apDays) / 30));
+  const deltaWC = zero();
+  for (let i = 0; i < n; i++) {
+    const dAR = i === 0 ? 0 : arBal[i] - arBal[i - 1];
+    const dAP = i === 0 ? 0 : apBal[i] - apBal[i - 1];
+    deltaWC[i] = -dAR + dAP; // AR up = cash out; AP up = cash in
+  }
+
+  const capex = zero().map(() => -(config?.capexMonthlyCents ?? 0));
+
+  // Financing from the financing category lines, expanded monthly.
+  const financing = zero();
+  const h0 = new Date(`${columns[0].key}-01T00:00:00Z`);
+  const last = columns[n - 1];
+  const hN = new Date(Date.UTC(Number(last.key.slice(0, 4)), Number(last.key.slice(5, 7)), 0));
+  for (const l of lines) {
+    const def = CASH_CATEGORY_MAP[l.category];
+    if (!def) continue;
+    for (const d of occurrences({ category: l.category, amountCents: l.amountCents, cadence: l.cadence, startDate: l.startDate, endDate: l.endDate }, h0, hN)) {
+      const i = columnIndexForDate(columns, "monthly", d);
+      if (i >= 0) financing[i] += l.amountCents * def.sign;
+    }
+  }
+
+  const cfo = zero(), netChange = zero(), ending = zero(), beginning = zero();
+  const opening = await effectiveOpening(config);
+  for (let i = 0; i < n; i++) {
+    cfo[i] = netIncome[i] + dna[i] + deltaWC[i];
+    netChange[i] = cfo[i] + capex[i] + financing[i];
+    beginning[i] = i === 0 ? opening.cents : ending[i - 1];
+    ending[i] = beginning[i] + netChange[i];
+  }
+
+  const R = (key: string, label: string, values: number[], opts: { strong?: boolean; sub?: boolean } = {}): IndirectRow => ({ key, label, values, ...opts });
+
+  return {
+    columns,
+    opening,
+    pnl: [
+      R("revenue", "Revenue", revenue),
+      R("cogs", "COGS", cogs, { sub: true }),
+      R("gross_profit", "Gross Profit", grossProfit, { strong: true }),
+      R("opex", "Operating Expenses", opex, { sub: true }),
+      R("ebitda", "EBITDA", ebitda, { strong: true }),
+      R("dna", "Depreciation & Amortization", dna, { sub: true }),
+      R("interest", "Interest Expense", interest, { sub: true }),
+      R("tax", "Income Tax", tax, { sub: true }),
+      R("net_income", "Net Income", netIncome, { strong: true }),
+    ],
+    cash: [
+      R("ni", "Net Income", netIncome),
+      R("addback_dna", "+ Depreciation & Amortization", dna, { sub: true }),
+      R("wc", "± Change in Working Capital", deltaWC, { sub: true }),
+      R("cfo", "Cash from Operations", cfo, { strong: true }),
+      R("capex", "− Capital Expenditures", capex, { sub: true }),
+      R("financing", "Financing (debt, distributions)", financing, { sub: true }),
+      R("net_change", "Net Change in Cash", netChange, { strong: true }),
+      R("beginning", "Beginning Cash", beginning),
+      R("ending", "Ending Cash", ending, { strong: true }),
+    ],
+    ending,
   };
 }
 
 // ── Config + lines CRUD ──────────────────────────────────────────────────────
-export async function getCashPosition() {
+export async function getCashConfig() {
   return prisma.cashPosition.findUnique({ where: { scope: "firm" } });
 }
 
-export async function setCashPosition(input: { openingCents: number; openingAsOf: string; minCashCents: number }) {
-  return prisma.cashPosition.upsert({
-    where: { scope: "firm" },
-    update: { openingCents: input.openingCents, openingAsOf: new Date(input.openingAsOf), minCashCents: input.minCashCents },
-    create: { scope: "firm", openingCents: input.openingCents, openingAsOf: new Date(input.openingAsOf), minCashCents: input.minCashCents },
-  });
-}
-
-/** Best-effort opening seed: consolidated cash from the latest balance sheet. */
-export async function latestCashActualCents(): Promise<number | null> {
-  const months = await availableMonths();
-  if (months.length === 0) return null;
-  const bs = await buildStatement(null, months[0], "BS");
-  const cash = bs.lines.find((l) => l.code === "1000");
-  return cash ? Math.round(cash.amount * 100) : null;
+export async function setCashConfig(input: {
+  openingCents: number;
+  openingAsOf: string;
+  useQboOpening: boolean;
+  minCashCents: number;
+  locLimitCents: number;
+  locOpeningCents: number;
+  dnaMonthlyCents: number;
+  capexMonthlyCents: number;
+  arDays: number;
+  apDays: number;
+}) {
+  const data = {
+    openingCents: input.openingCents,
+    openingAsOf: new Date(input.openingAsOf),
+    useQboOpening: input.useQboOpening,
+    minCashCents: input.minCashCents,
+    locLimitCents: input.locLimitCents,
+    locOpeningCents: input.locOpeningCents,
+    dnaMonthlyCents: input.dnaMonthlyCents,
+    capexMonthlyCents: input.capexMonthlyCents,
+    arDays: input.arDays,
+    apDays: input.apDays,
+  };
+  return prisma.cashPosition.upsert({ where: { scope: "firm" }, update: data, create: { scope: "firm", ...data } });
 }
 
 export async function listCashLines() {
-  return prisma.cashFlowLine.findMany({ orderBy: [{ active: "desc" }, { startDate: "asc" }] });
+  return prisma.cashFlowLine.findMany({ orderBy: [{ active: "desc" }, { category: "asc" }, { startDate: "asc" }] });
 }
 
 export async function addCashLine(input: {
   label: string;
-  kind: "INFLOW" | "OUTFLOW";
+  category: string;
   amountCents: number;
   cadence: "ONE_TIME" | "WEEKLY" | "BIWEEKLY" | "MONTHLY";
   startDate: string;
   endDate?: string | null;
-  category?: string | null;
   createdBy?: string | null;
 }) {
   return prisma.cashFlowLine.create({
     data: {
       label: input.label,
-      kind: input.kind,
+      category: input.category,
       amountCents: input.amountCents,
       cadence: input.cadence,
       startDate: new Date(input.startDate),
       endDate: input.endDate ? new Date(input.endDate) : null,
-      category: input.category ?? null,
       createdBy: input.createdBy ?? null,
     },
   });
