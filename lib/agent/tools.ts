@@ -1,56 +1,28 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import type { Stage, ActivityType, Direction } from "@prisma/client";
 import { createBooking } from "@/lib/booking";
 import { sendMailAsUser, graphConfigured, deleteCalendarEvent } from "@/lib/graph";
+import { type AgentContext, type AgentTool, type ToolResult, safeRevalidate, str } from "@/lib/agent/tool-kit";
+import { FINANCE_TOOLS } from "@/lib/agent/tools/finance";
+import { WORK_TOOLS } from "@/lib/agent/tools/work";
+import { MODULE_TOOLS } from "@/lib/agent/tools/modules";
 
 /**
- * LAPS-native tools for the embedded chat agent. Reads run inline in the agent
- * loop; writes are gated — the loop stops and the human confirms before `run`
- * is ever called (see lib/agent/run.ts). Every write reuses the same server
- * logic the UI uses, and always derives the actor from `ctx` (the signed-in
- * rep) rather than trusting anything the model supplies.
+ * Pulse-native tools for the embedded chat agent + the claude.ai MCP connector.
+ * Reads run inline in the agent loop; writes are gated — the loop stops and the
+ * human confirms before `run` is ever called (see lib/agent/run.ts). Every write
+ * reuses the same server logic the UI uses, and always derives the actor from
+ * `ctx` (the signed-in user) rather than trusting anything the model supplies.
+ *
+ * This file holds the Sales-cycle tools; Finance, Work, and Marketing/Delivery
+ * tools live under lib/agent/tools/* and are spread into AGENT_TOOLS below so the
+ * agent spans every module.
  */
 
-export type AgentContext = {
-  userId: string;
-  role?: string;
-  name?: string | null;
-  email?: string | null;
-};
-
-export type ToolResult = { ok: boolean; [k: string]: unknown };
-
-export type AgentTool = {
-  name: string;
-  description: string;
-  mode: "read" | "write";
-  input_schema: Anthropic.Tool.InputSchema;
-  /** Human-readable one-liner shown on the confirmation card (writes only). */
-  confirmSummary?: (input: Record<string, unknown>) => string;
-  run: (input: Record<string, unknown>, ctx: AgentContext) => Promise<ToolResult>;
-};
+export type { AgentContext, AgentTool, ToolResult } from "@/lib/agent/tool-kit";
 
 const STAGES: Stage[] = ["NEW", "APPOINTMENT", "PROPOSAL", "CLOSED_WON", "CLOSED_LOST"];
-
-/**
- * Best-effort cache revalidation. `revalidatePath` throws outside a Next
- * request store (e.g. the MCP route's tool-execution context, or a script), and
- * refreshing a page cache must never fail a data write — so swallow that error.
- */
-function safeRevalidate(path: string): void {
-  try {
-    revalidatePath(path);
-  } catch {
-    /* no request store — the write already succeeded */
-  }
-}
-
-function str(input: Record<string, unknown>, key: string): string | undefined {
-  const v = input[key];
-  return typeof v === "string" && v.trim() ? v.trim() : undefined;
-}
 
 function leadName(l: { firstName: string; lastName: string; companyName: string | null }): string {
   const person = `${l.firstName} ${l.lastName}`.trim();
@@ -650,6 +622,7 @@ const deleteAppointmentTool: AgentTool = {
 };
 
 export const AGENT_TOOLS: AgentTool[] = [
+  // ── Sales (LAPS) ──
   // reads
   listLeads,
   getLead,
@@ -668,6 +641,10 @@ export const AGENT_TOOLS: AgentTool[] = [
   bookCallTool,
   sendEmailTool,
   deleteAppointmentTool,
+  // ── Finance, Work, Marketing/Delivery ──
+  ...FINANCE_TOOLS,
+  ...WORK_TOOLS,
+  ...MODULE_TOOLS,
 ];
 
 export const TOOLS_BY_NAME: Record<string, AgentTool> = Object.fromEntries(
