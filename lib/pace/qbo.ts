@@ -268,13 +268,21 @@ export async function pullTrialBalance(entityId: string, periodMonthISO: string)
     }
     const report = (await res.json()) as QboReport;
     const rows = parseTrialBalance(report);
-    // Enrich with account numbers from the Account list (the TB report carries
-    // only id + name), so the source COA sorts and reads by account number.
+    // Enrich with QBO's descriptive metadata from the Account list (the TB
+    // report carries only id + name + balance). AccountType/SubType/
+    // Classification + account number let the statements rebuild natively and
+    // sort/read by account number — no manual mapping.
     const accts = await fetchAccountMap(auth);
     if (accts) {
       for (const r of rows) {
         const meta = r.externalId ? accts.get(r.externalId) : undefined;
-        if (meta?.acctNum) r.acctNum = meta.acctNum;
+        if (!meta) continue;
+        if (meta.acctNum) r.acctNum = meta.acctNum;
+        r.accountType = meta.type;
+        r.accountSubType = meta.subType;
+        r.classification = meta.classification;
+        r.fqName = meta.fqName;
+        r.parentExternalId = meta.parentExternalId;
       }
     }
     return rows;
@@ -407,14 +415,35 @@ export async function pullGeneralLedger(entityId: string, startISO: string, endI
   }
 }
 
-// ── Account list (for numbers + the mapping queue) ──────────────────────────
-type QboAccount = { Id?: string; Name?: string; AcctNum?: string; AccountType?: string; Active?: boolean };
+// ── Account list (QBO's descriptive chart of accounts) ──────────────────────
+type QboAccount = {
+  Id?: string;
+  Name?: string;
+  FullyQualifiedName?: string;
+  AcctNum?: string;
+  AccountType?: string;
+  AccountSubType?: string;
+  Classification?: string;
+  Active?: boolean;
+  ParentRef?: { value?: string };
+};
 type QboAccountResponse = { QueryResponse?: { Account?: QboAccount[] } };
 
-/** Fetch id → { acctNum, name, type } for a company's chart of accounts. */
-async function fetchAccountMap(
-  auth: { token: string; realmId: string },
-): Promise<Map<string, { acctNum?: string; name: string; type?: string; active: boolean }> | null> {
+/** The descriptive metadata QBO carries for one account — the whole point of
+ * the native rebuild: AccountType/SubType/Classification + parent hierarchy. */
+export type QboAccountMeta = {
+  acctNum?: string;
+  name: string;
+  fqName?: string;
+  type?: string; // AccountType
+  subType?: string; // AccountSubType
+  classification?: string; // Asset | Liability | Equity | Revenue | Expense
+  parentExternalId?: string;
+  active: boolean;
+};
+
+/** Fetch id → descriptive metadata for a company's chart of accounts. */
+async function fetchAccountMap(auth: { token: string; realmId: string }): Promise<Map<string, QboAccountMeta> | null> {
   const query = encodeURIComponent("select * from Account maxresults 1000");
   const url = `${apiBase()}/v3/company/${auth.realmId}/query?query=${query}&minorversion=70`;
   try {
@@ -425,10 +454,19 @@ async function fetchAccountMap(
     }
     const payload = (await res.json()) as QboAccountResponse;
     const list = payload?.QueryResponse?.Account ?? [];
-    const map = new Map<string, { acctNum?: string; name: string; type?: string; active: boolean }>();
+    const map = new Map<string, QboAccountMeta>();
     for (const a of list) {
       if (!a.Id) continue;
-      map.set(a.Id, { acctNum: a.AcctNum || undefined, name: a.Name || a.Id, type: a.AccountType, active: a.Active !== false });
+      map.set(a.Id, {
+        acctNum: a.AcctNum || undefined,
+        name: a.Name || a.Id,
+        fqName: a.FullyQualifiedName || undefined,
+        type: a.AccountType || undefined,
+        subType: a.AccountSubType || undefined,
+        classification: a.Classification || undefined,
+        parentExternalId: a.ParentRef?.value || undefined,
+        active: a.Active !== false,
+      });
     }
     return map;
   } catch (err) {
@@ -438,10 +476,10 @@ async function fetchAccountMap(
 }
 
 /**
- * Sync a QBO company's chart of accounts into LedgerAccounts (name + account
- * number + type), preserving any existing reporting-COA mapping. This seeds the
- * COA-mapping queue so a budget/actuals import has accounts to map to. Returns
- * the count synced, or null when not connected.
+ * Sync a QBO company's chart of accounts into LedgerAccounts, capturing QBO's
+ * descriptive metadata (AccountType/SubType/Classification + parent hierarchy)
+ * so the statements can be rebuilt natively — no manual mapping. Returns the
+ * count synced, or null when not connected.
  */
 export async function syncLedgerAccounts(entityId: string): Promise<number | null> {
   const auth = await getAccessToken(entityId);
@@ -450,17 +488,20 @@ export async function syncLedgerAccounts(entityId: string): Promise<number | nul
   if (!accts) return null;
   let n = 0;
   for (const [qboId, meta] of accts) {
+    const data = {
+      name: meta.name,
+      acctNum: meta.acctNum ?? null,
+      sourceType: meta.type ?? null,
+      accountSubType: meta.subType ?? null,
+      classification: meta.classification ?? null,
+      fqName: meta.fqName ?? null,
+      parentExternalId: meta.parentExternalId ?? null,
+      active: meta.active,
+    };
     await prisma.ledgerAccount.upsert({
       where: { entityId_externalId: { entityId, externalId: qboId } },
-      update: { name: meta.name, acctNum: meta.acctNum ?? null, sourceType: meta.type ?? null, active: meta.active },
-      create: {
-        entityId,
-        externalId: qboId,
-        acctNum: meta.acctNum ?? null,
-        name: meta.name,
-        sourceType: meta.type ?? null,
-        active: meta.active,
-      },
+      update: data,
+      create: { entityId, externalId: qboId, ...data },
     });
     n += 1;
   }

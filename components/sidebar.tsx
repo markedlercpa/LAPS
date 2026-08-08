@@ -114,7 +114,6 @@ const MODULES: Module[] = [
       { href: "/finance/variance", label: "Budget vs Actual", icon: Scale },
       { href: "/finance/review", label: "Operating Review", icon: FileBarChart },
       { href: "/finance/entities", label: "Entities", icon: Boxes },
-      { href: "/finance/mapping", label: "COA Mapping", icon: ClipboardList },
     ],
   },
 ];

@@ -1,12 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { ensureReportingCoaSeeded } from "@/lib/pace/coa";
 
 /**
- * Manual / CSV trial-balance import. Upserts source ledger accounts, records the
- * period + signed lines, auto-maps to the reporting COA where possible (by code
- * or an explicit reportingCode hint), runs the debits=credits data-quality
- * check, and logs a SyncRun. Never drops a line — unmapped accounts land in the
- * exception queue.
+ * Manual / CSV / QBO trial-balance import. Upserts source ledger accounts
+ * (carrying QBO's descriptive metadata — AccountType/SubType/Classification —
+ * so statements rebuild natively with no mapping), records the period + signed
+ * lines, runs the debits=credits data-quality check, and logs a SyncRun. Never
+ * drops a line.
  *
  * Convention: `amount` is the signed period balance (debit balances positive,
  * credit balances negative), so a balanced TB sums to ~0.
@@ -16,8 +15,14 @@ export type TbRow = {
   externalId?: string; // stable source id if available
   name: string;
   amount: number; // signed: debit +, credit -
-  reportingCode?: string; // optional explicit map hint
   acctNum?: string; // source account number (QBO AcctNum), for display + sort
+  // QBO descriptive metadata (drives native classification). Optional so a bare
+  // manual CSV still imports — such accounts land in the "Unclassified" section.
+  accountType?: string;
+  accountSubType?: string;
+  classification?: string;
+  fqName?: string;
+  parentExternalId?: string;
 };
 
 const BALANCE_TOLERANCE = 0.01;
@@ -29,43 +34,35 @@ export async function importTrialBalance(input: {
   source?: string; // "manual" | "qbo"
   status?: "OPEN" | "CLOSED";
 }) {
-  await ensureReportingCoaSeeded();
-
   const month = new Date(input.periodMonth);
   const periodMonth = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), 1));
-
-  const reportingByCode = new Map(
-    (await prisma.reportingAccount.findMany({ select: { id: true, code: true } })).map((r) => [r.code, r.id]),
-  );
 
   const run = await prisma.syncRun.create({
     data: { entityId: input.entityId, status: "OK", message: `Import ${input.source ?? "manual"}` },
   });
 
-  // Upsert accounts + collect their ids, auto-mapping where possible.
-  let unmapped = 0;
+  // Upsert accounts (with QBO metadata) + collect their ids. Metadata is only
+  // written when present so a bare manual re-import never wipes a QBO sync's
+  // classification.
+  let unclassified = 0;
   const lineData: { ledgerAccountId: string; amount: number }[] = [];
   for (const row of input.rows) {
     const externalId = row.externalId || row.name;
-    const mappedReportingAccountId = row.reportingCode ? (reportingByCode.get(row.reportingCode) ?? null) : null;
+    const meta = {
+      ...(row.acctNum ? { acctNum: row.acctNum } : {}),
+      ...(row.accountType ? { sourceType: row.accountType } : {}),
+      ...(row.accountSubType ? { accountSubType: row.accountSubType } : {}),
+      ...(row.classification ? { classification: row.classification } : {}),
+      ...(row.fqName ? { fqName: row.fqName } : {}),
+      ...(row.parentExternalId ? { parentExternalId: row.parentExternalId } : {}),
+    };
 
     const account = await prisma.ledgerAccount.upsert({
       where: { entityId_externalId: { entityId: input.entityId, externalId } },
-      update: {
-        name: row.name,
-        ...(row.acctNum ? { acctNum: row.acctNum } : {}),
-        // Only set mapping if we resolved one and it isn't already mapped.
-        ...(mappedReportingAccountId ? { mappedReportingAccountId } : {}),
-      },
-      create: {
-        entityId: input.entityId,
-        externalId,
-        acctNum: row.acctNum ?? null,
-        name: row.name,
-        mappedReportingAccountId,
-      },
+      update: { name: row.name, ...meta },
+      create: { entityId: input.entityId, externalId, name: row.name, acctNum: row.acctNum ?? null, ...meta },
     });
-    if (!account.mappedReportingAccountId) unmapped += 1;
+    if (!account.sourceType && !account.classification) unclassified += 1;
     lineData.push({ ledgerAccountId: account.id, amount: row.amount });
   }
 
@@ -101,9 +98,9 @@ export async function importTrialBalance(input: {
     data: {
       finishedAt: new Date(),
       status: balanced ? "OK" : "PARTIAL",
-      stats: { accounts: input.rows.length, lines: lineData.length, unmapped, balanced, imbalance: sum },
+      stats: { accounts: input.rows.length, lines: lineData.length, unclassified, balanced, imbalance: sum },
     },
   });
 
-  return { ok: true as const, periodId: period.id, balanced, unmapped, imbalance: sum };
+  return { ok: true as const, periodId: period.id, balanced, unclassified, imbalance: sum };
 }

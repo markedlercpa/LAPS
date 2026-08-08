@@ -5,7 +5,6 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { importTrialBalance, type TbRow } from "@/lib/pace/import";
-import { mapAccount } from "@/lib/pace/coa";
 import { qboConfigured, authorizeUrl, pullTrialBalance, pullGeneralLedger, syncLedgerAccounts } from "@/lib/pace/qbo";
 import { importGeneralLedger } from "@/lib/pace/gl";
 import { ENTITY_KINDS } from "@/lib/pace-taxonomy";
@@ -33,8 +32,11 @@ export async function createEntity(input: unknown) {
 
 /**
  * Parse a trial-balance CSV. Accepts, per line:
- *   name, amount [, reportingCode]        (signed amount: debit +, credit -)
- *   name, debit, credit [, reportingCode] (two numbers → amount = debit - credit)
+ *   name, amount [, accountType]        (signed amount: debit +, credit -)
+ *   name, debit, credit [, accountType] (two numbers → amount = debit - credit)
+ * The optional trailing text is treated as a QuickBooks AccountType hint (e.g.
+ * "Bank", "Income", "Expense") so a manually-pasted TB still classifies onto the
+ * statements. Omit it and the account lands in the "Unclassified" section.
  */
 function parseCsv(text: string): TbRow[] {
   const rows: TbRow[] = [];
@@ -46,7 +48,7 @@ function parseCsv(text: string): TbRow[] {
     const name = cells[0];
     if (!name || /^(account|name)$/i.test(name)) continue; // skip header
     const nums: number[] = [];
-    let reportingCode: string | undefined;
+    let accountType: string | undefined;
     for (const cell of cells.slice(1)) {
       if (!cell) continue;
       // Accounting style: $, thousands commas already split — and (123) = -123.
@@ -54,13 +56,13 @@ function parseCsv(text: string): TbRow[] {
       const cleaned = cell.replace(/[$()]/g, "");
       const n = Number(cleaned);
       if (cleaned !== "" && !Number.isNaN(n)) nums.push(neg ? -n : n);
-      else reportingCode = cell;
+      else accountType = cell;
     }
     let amount: number;
     if (nums.length >= 2) amount = nums[0] - nums[1]; // debit, credit
     else if (nums.length === 1) amount = nums[0]; // signed
     else continue;
-    rows.push({ name, amount, reportingCode });
+    rows.push({ name, amount, accountType });
   }
   return rows;
 }
@@ -89,7 +91,6 @@ export async function importTrialBalanceAction(input: unknown) {
     status: parsed.data.status,
   });
   revalidatePath("/finance/actuals");
-  revalidatePath("/finance/mapping");
   return res;
 }
 
@@ -106,14 +107,6 @@ export async function setPeriodStatusAction(entityId: string, periodMonthISO: st
   return { ok: true as const };
 }
 
-export async function mapAccountAction(ledgerAccountId: string, reportingAccountId: string | null) {
-  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
-  await mapAccount(ledgerAccountId, reportingAccountId);
-  revalidatePath("/finance/mapping");
-  revalidatePath("/finance/actuals");
-  return { ok: true as const };
-}
-
 /** Returns an Intuit authorize URL for the client to redirect to, or an error. */
 export async function startQboConnect(entityId: string) {
   if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
@@ -121,28 +114,6 @@ export async function startQboConnect(entityId: string) {
   const url = await authorizeUrl(entityId);
   if (!url) return { ok: false as const, error: "Could not build the authorize URL." };
   return { ok: true as const, url };
-}
-
-/**
- * Pull the chart of accounts (with account numbers) from every QBO-connected
- * entity into the COA-mapping queue. Lets the user map accounts before importing
- * a budget or actuals, and backfills account numbers on existing accounts.
- */
-export async function syncQboAccountsAction() {
-  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
-  if (!qboConfigured()) return { ok: false as const, error: "QuickBooks is not configured." };
-  const conns = await prisma.ledgerConnection.findMany({
-    where: { provider: "QBO", status: "connected" },
-    select: { entityId: true },
-  });
-  if (conns.length === 0) return { ok: false as const, error: "No QBO-connected entities." };
-  let synced = 0;
-  for (const c of conns) {
-    const n = await syncLedgerAccounts(c.entityId);
-    if (n) synced += n;
-  }
-  revalidatePath("/finance/mapping");
-  return { ok: true as const, synced };
 }
 
 export async function triggerQboSync(entityId: string, periodMonth: string) {
@@ -218,7 +189,6 @@ export async function syncQboActualsAction(entityId: string, monthsBack = 24) {
   }
 
   revalidatePath("/finance/actuals");
-  revalidatePath("/finance/mapping");
   revalidatePath("/finance/review");
   revalidatePath("/finance/ledger");
   return {

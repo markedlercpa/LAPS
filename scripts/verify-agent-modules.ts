@@ -11,11 +11,15 @@ const ctx: AgentContext = { userId: "test-agent", role: "ADMIN", email: "test@ex
 async function main() {
   // Registry spans all modules.
   const names = AGENT_TOOLS.map((t) => t.name);
-  const expect = ["list_leads", "finance_list_reporting_coa", "finance_map_account", "work_list_portfolios", "work_log_time", "marketing_list_evidence", "delivery_list_engagements"];
+  const expect = ["list_leads", "finance_list_reporting_coa", "finance_get_statement", "work_list_portfolios", "work_log_time", "marketing_list_evidence", "delivery_list_engagements"];
   for (const n of expect) if (!names.includes(n)) throw new Error(`missing tool ${n}`);
+  // The manual-mapping tools are gone under the QBO-native rebuild.
+  for (const gone of ["finance_map_account", "finance_list_unmapped_accounts"]) {
+    if (names.includes(gone)) throw new Error(`tool ${gone} should have been removed`);
+  }
   console.log(`registry: ${AGENT_TOOLS.length} tools across modules`);
 
-  // Reporting COA read.
+  // Reporting COA read (still the budgeting dimension).
   const coa = await TOOLS_BY_NAME.finance_list_reporting_coa.run({}, ctx);
   console.log(`finance_list_reporting_coa → ${coa.count} accounts`);
   if (!coa.ok || Number(coa.count) < 20) throw new Error("reporting COA not seeded");
@@ -25,20 +29,20 @@ async function main() {
   if (!cash.ok) throw new Error("cash forecast tool failed");
   console.log(`finance_get_cash_forecast → beginning ${cash.beginning}`);
 
-  // COA mapping round-trip: create a source account, map it by code, verify, cleanup.
+  // Statement read: import a native (QBO-typed) TB → the P&L rebuilds with no mapping.
+  const { importTrialBalance } = await import("@/lib/pace/import");
   const entity = await prisma.entity.create({ data: { name: "ZZZ Agent Co", connection: { create: {} } } });
-  const acct = await prisma.ledgerAccount.create({ data: { entityId: entity.id, externalId: "AGT-1", name: "Consulting Income", acctNum: "4001" } });
-
-  const unmapped = await TOOLS_BY_NAME.finance_list_unmapped_accounts.run({ entityId: entity.id }, ctx);
-  console.log(`finance_list_unmapped_accounts → ${unmapped.count} (expect >=1)`);
-  if (Number(unmapped.count) < 1) throw new Error("new account should be unmapped");
-
-  const mapped = await TOOLS_BY_NAME.finance_map_account.run({ ledgerAccountId: acct.id, reportingCode: "4000" }, ctx);
-  console.log(`finance_map_account → ok=${mapped.ok}`);
-  if (!mapped.ok) throw new Error(`map failed: ${mapped.error}`);
-  const check = await prisma.ledgerAccount.findUnique({ where: { id: acct.id }, include: { reportingAccount: { select: { code: true } } } });
-  if (check?.reportingAccount?.code !== "4000") throw new Error("account not mapped to 4000");
-  console.log(`  → ${check?.name} now maps to ${check?.reportingAccount?.code}`);
+  await importTrialBalance({
+    entityId: entity.id,
+    periodMonth: "2026-07-01",
+    rows: [
+      { name: "Checking", amount: 90000, accountType: "Bank" },
+      { name: "Consulting Income", amount: -90000, accountType: "Income" },
+    ],
+  });
+  const stmt = await TOOLS_BY_NAME.finance_get_statement.run({ statement: "IS", entityId: entity.id }, ctx);
+  console.log(`finance_get_statement → ok=${stmt.ok} sections=${(stmt.sections as unknown[])?.length}`);
+  if (!stmt.ok || (stmt.subtotals as { revenue: number }).revenue !== 90000) throw new Error("statement did not rebuild natively");
 
   // work_list_portfolios read.
   const pf = await TOOLS_BY_NAME.work_list_portfolios.run({}, ctx);

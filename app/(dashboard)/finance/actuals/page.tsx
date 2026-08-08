@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { MetricRow } from "@/components/metric-row";
@@ -48,7 +49,7 @@ export default async function ActualsPage({
       <PageHeader
         eyebrow="Finance — Actuals"
         title="Financial statements"
-        description="P&L and Balance Sheet from cached trial balances — per entity or consolidated. Every figure ties to the loaded TB."
+        description="P&L and Balance Sheet rebuilt natively from the QuickBooks chart of accounts — no manual mapping. Per entity or consolidated; every figure ties to the loaded trial balance."
       >
         {entitySel && entitySel !== "all" && (
           <>
@@ -152,9 +153,9 @@ function StatementBlock({
         {period && <span className="tag tag-neutral">{period.status === "CLOSED" ? "Closed" : "Open"}</span>}
         {period && <span className="tag tag-neutral">Source: {period.source}</span>}
         {consolidated && <span className="tag tag-outline">Consolidated</span>}
-        {statement.unmappedAmount !== 0 && (
-          <span className="tag tag-outline">
-            Unmapped: {formatCurrency(statement.unmappedAmount)} — resolve in <a className="text-accent-700" href="/finance/mapping">COA mapping</a>
+        {Math.abs(statement.unclassifiedAmount) >= 0.5 && (
+          <span className="tag tag-outline" title="Accounts QuickBooks didn't tag with an AccountType — check the QBO chart of accounts.">
+            Unclassified: {formatCurrency(statement.unclassifiedAmount)}
           </span>
         )}
       </div>
@@ -165,25 +166,36 @@ function StatementBlock({
         <thead>
           <tr>
             <th>Account</th>
-            <th>Category</th>
             <th className="num">Amount</th>
           </tr>
         </thead>
         <tbody>
-          {statement.lines.map((l) => (
-            <tr key={l.reportingAccountId}>
-              <td>
-                <a
-                  className="text-accent-700"
-                  href={`/finance/ledger?entity=${entityParam}&account=${l.reportingAccountId}&from=${ym}&to=${ym}`}
-                  title="Drill into the transactions behind this line"
-                >
-                  {l.name}
-                </a>
-              </td>
-              <td className="text-muted">{l.category ?? l.type}</td>
-              <td className="num">{formatCurrency(l.amount)}</td>
-            </tr>
+          {statement.groups.map((g) => (
+            <Fragment key={g.section}>
+              <tr>
+                <td className="pt-4 font-heading text-[12px] font-extrabold uppercase tracking-wide text-muted">{g.label}</td>
+                <td></td>
+              </tr>
+              {g.lines.map((l) => (
+                <tr key={l.ledgerAccountId}>
+                  <td style={{ paddingLeft: `${12 + l.depth * 16}px` }}>
+                    <a
+                      className="text-accent-700"
+                      href={`/finance/ledger?entity=${entityParam}&account=${l.ledgerAccountId}&from=${ym}&to=${ym}`}
+                      title="Drill into the transactions behind this line"
+                    >
+                      {l.acctNum ? <span className="text-muted">{l.acctNum} · </span> : null}
+                      {l.name}
+                    </a>
+                  </td>
+                  <td className="num">{formatCurrency(l.amount)}</td>
+                </tr>
+              ))}
+              <tr>
+                <td className="font-heading font-extrabold">Total {g.label}</td>
+                <td className="num font-heading font-extrabold">{formatCurrency(g.subtotal)}</td>
+              </tr>
+            </Fragment>
           ))}
         </tbody>
       </table>

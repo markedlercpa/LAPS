@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
-import { createBudget, saveBudgetLinesBulk, setBudgetStatus, deleteBudget, importQboBudget } from "@/lib/pace/budgets";
+import { createBudget, saveBudgetLinesBulk, setBudgetStatus, deleteBudget } from "@/lib/pace/budgets";
 import { upsertNote, draftNarrative } from "@/lib/pace/narratives";
 
 async function requireUser() {
@@ -42,36 +42,6 @@ export async function saveBudgetGridAction(
   return res;
 }
 
-const importQboSchema = z.object({
-  entityId: z.string().min(1),
-  fiscalYear: z.coerce.number().int().min(2000).max(2100),
-  budgetName: z.string().optional(),
-});
-
-/** List the QBO budgets available for an entity (name + the fiscal years each covers). */
-export async function listQboBudgetsAction(entityId: string) {
-  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
-  const { pullBudget } = await import("@/lib/pace/qbo");
-  const budgets = await pullBudget(entityId);
-  if (!budgets) return { ok: false as const, error: "QBO not connected for this entity, or the pull failed." };
-  return {
-    ok: true as const,
-    budgets: budgets.map((b) => ({
-      name: b.name,
-      years: Array.from(new Set(b.lines.map((l) => Number(l.month.slice(0, 4))))).sort((a, z) => z - a),
-    })),
-  };
-}
-
-export async function importQboBudgetAction(input: unknown) {
-  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
-  const parsed = importQboSchema.safeParse(input);
-  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
-  const res = await importQboBudget(parsed.data);
-  if (res.ok) revalidatePath("/finance/budgets");
-  return res;
-}
-
 export async function setBudgetStatusAction(budgetId: string, locked: boolean) {
   if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
   await setBudgetStatus(budgetId, locked);
@@ -91,7 +61,7 @@ export async function deleteBudgetAction(budgetId: string) {
 
 const noteSchema = z.object({
   entityId: z.string().min(1),
-  reportingAccountId: z.string().min(1),
+  accountKey: z.string().min(1),
   periodMonthISO: z.string().min(1),
   text: z.string().min(1, "Explanation is empty"),
   aiDrafted: z.boolean().optional(),

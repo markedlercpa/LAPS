@@ -70,17 +70,16 @@ export type GlRow = {
   amount: number;
   sourceAccount: string | null;
   sourceAcctNum: string | null;
-  reportingAccount: string | null;
+  accountType: string | null;
 };
 
 /**
- * Query GL lines with optional filters. `reportingAccountId` filters by the
- * mapped reporting account (drill-down from a statement line); `ledgerAccountId`
- * by the raw source account. Month range is inclusive "YYYY-MM".
+ * Query GL lines with optional filters. `ledgerAccountId` filters by the raw
+ * source account (drill-down from a statement line). Month range is inclusive
+ * "YYYY-MM".
  */
 export async function queryGeneralLedger(filters: {
   entityId?: string | null; // null/undefined = all entities (consolidated drill)
-  reportingAccountId?: string;
   ledgerAccountId?: string;
   fromMonth?: string; // "YYYY-MM"
   toMonth?: string; // "YYYY-MM"
@@ -89,9 +88,6 @@ export async function queryGeneralLedger(filters: {
   const where: Record<string, unknown> = {};
   if (filters.entityId) where.entityId = filters.entityId;
   if (filters.ledgerAccountId) where.ledgerAccountId = filters.ledgerAccountId;
-  if (filters.reportingAccountId) {
-    where.ledgerAccount = { mappedReportingAccountId: filters.reportingAccountId };
-  }
   if (filters.fromMonth || filters.toMonth) {
     const range: Record<string, Date> = {};
     if (filters.fromMonth) range.gte = new Date(`${filters.fromMonth}-01T00:00:00Z`);
@@ -110,7 +106,7 @@ export async function queryGeneralLedger(filters: {
       take: limit,
       include: {
         entity: { select: { name: true } },
-        ledgerAccount: { select: { name: true, acctNum: true, reportingAccount: { select: { code: true, name: true } } } },
+        ledgerAccount: { select: { name: true, acctNum: true, sourceType: true } },
       },
     }),
     prisma.generalLedgerLine.aggregate({ where, _sum: { amount: true } }),
@@ -129,9 +125,7 @@ export async function queryGeneralLedger(filters: {
     amount: Number(l.amount),
     sourceAccount: l.ledgerAccount?.name ?? null,
     sourceAcctNum: l.ledgerAccount?.acctNum ?? null,
-    reportingAccount: l.ledgerAccount?.reportingAccount
-      ? `${l.ledgerAccount.reportingAccount.code ? l.ledgerAccount.reportingAccount.code + " · " : ""}${l.ledgerAccount.reportingAccount.name}`
-      : null,
+    accountType: l.ledgerAccount?.sourceType ?? null,
   }));
 
   return { rows, total: Number(agg._sum.amount ?? 0), count };

@@ -2,8 +2,10 @@ import { prisma } from "@/lib/prisma";
 import { REPORTING_COA_SEED } from "@/lib/pace-taxonomy";
 
 /**
- * Reporting COA management + the account-mapping layer (exception queue lives
- * here as "unmapped ledger accounts").
+ * Reporting COA management. The reporting chart of accounts is the budgeting
+ * dimension (budgets + budget-vs-actual). Actuals are NOT mapped here — the
+ * statements are rebuilt natively from QuickBooks' own account metadata (see
+ * lib/pace/qbo-taxonomy.ts).
  */
 
 let seeded = false;
@@ -36,21 +38,4 @@ export async function ensureReportingCoaSeeded(): Promise<void> {
 export async function listReportingAccounts() {
   await ensureReportingCoaSeeded();
   return prisma.reportingAccount.findMany({ orderBy: { sortOrder: "asc" } });
-}
-
-/** Map (or re-map) a source ledger account to a reporting account. */
-export async function mapAccount(ledgerAccountId: string, reportingAccountId: string | null) {
-  return prisma.ledgerAccount.update({
-    where: { id: ledgerAccountId },
-    data: { mappedReportingAccountId: reportingAccountId },
-  });
-}
-
-/** The exception queue: source accounts not yet mapped to the reporting COA. */
-export async function unmappedAccounts(entityId?: string) {
-  return prisma.ledgerAccount.findMany({
-    where: { mappedReportingAccountId: null, active: true, ...(entityId ? { entityId } : {}) },
-    include: { entity: { select: { name: true } } },
-    orderBy: { name: "asc" },
-  });
 }

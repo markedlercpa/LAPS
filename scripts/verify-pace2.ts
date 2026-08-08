@@ -1,5 +1,7 @@
 /**
- * Throwaway smoke test for PACE Phase 2 (Expectations). Run from repo root:
+ * Throwaway smoke test for PACE Phase 2 (Expectations) under the QBO-native
+ * rebuild. Budgets stay on the reporting COA; budget-vs-actual is section-level
+ * (actuals classified by QBO AccountType). Run from repo root:
  *   set -a && . ./.env && set +a && npx tsx scripts/verify-pace2.ts
  */
 import { prisma } from "@/lib/prisma";
@@ -15,23 +17,23 @@ async function main() {
   await ensureReportingCoaSeeded();
   const ra = await prisma.reportingAccount.findMany({ select: { id: true, code: true } });
   const byCode = new Map(ra.map((r) => [r.code, r.id]));
-  const revId = byCode.get("4100") as string;
-  const payId = byCode.get("6000") as string;
+  const revId = byCode.get("4100") as string; // type Revenue
+  const payId = byCode.get("6000") as string; // type OpEx
 
   const entity = await prisma.entity.create({ data: { name: "ZZZ P2 Co", connection: { create: {} } } });
 
-  // Actuals: revenue 210k, payroll 90k (balanced with cash 120k).
+  // Actuals classified natively by QBO AccountType: revenue 210k, payroll 90k.
   await importTrialBalance({
     entityId: entity.id,
     periodMonth: MONTH,
     rows: [
-      { name: "Cash", amount: 120000, reportingCode: "1000" },
-      { name: "Revenue", amount: -210000, reportingCode: "4100" },
-      { name: "Payroll", amount: 90000, reportingCode: "6000" },
+      { name: "Checking", amount: 120000, accountType: "Bank" },
+      { name: "Revenue", amount: -210000, accountType: "Income" },
+      { name: "Payroll", amount: 90000, accountType: "Expense" },
     ],
   });
 
-  // Budget: revenue 200k, payroll 80k for the month.
+  // Budget: revenue 200k, payroll 80k for the month (per reporting line).
   const budget = await createBudget({ entityId: entity.id, fiscalYear: 2026, label: "FY Original" });
   await saveBudgetLinesBulk(budget.id, [
     { reportingAccountId: revId, monthly: { "2026-07": 200000 } },
@@ -39,13 +41,13 @@ async function main() {
   ]);
 
   const v = await computeVariance({ entityId: entity.id, budgetId: budget.id, periodMonthISO: MONTH, basis: "month" });
-  const rev = v.rows.find((r) => r.reportingAccountId === revId)!;
-  const pay = v.rows.find((r) => r.reportingAccountId === payId)!;
-  console.log(`revenue: actual=${rev.actual} budget=${rev.budget} var=${rev.varianceAmt} fav=${rev.favorable} material=${rev.material}`);
-  console.log(`payroll: actual=${pay.actual} budget=${pay.budget} var=${pay.varianceAmt} fav=${pay.favorable} material=${pay.material}`);
+  const rev = v.rows.find((r) => r.accountKey === "Revenue")!;
+  const pay = v.rows.find((r) => r.accountKey === "OpEx")!;
+  console.log(`Revenue: actual=${rev.actual} budget=${rev.budget} var=${rev.varianceAmt} fav=${rev.favorable} material=${rev.material}`);
+  console.log(`OpEx:    actual=${pay.actual} budget=${pay.budget} var=${pay.varianceAmt} fav=${pay.favorable} material=${pay.material}`);
   if (rev.actual !== 210000 || rev.budget !== 200000 || rev.varianceAmt !== 10000) throw new Error("revenue variance wrong");
   if (rev.favorable !== true) throw new Error("revenue over budget should be favorable");
-  if (pay.varianceAmt !== 10000 || pay.favorable !== false) throw new Error("payroll over budget should be unfavorable");
+  if (pay.varianceAmt !== 10000 || pay.favorable !== false) throw new Error("opex over budget should be unfavorable");
   if (!rev.material || !pay.material) throw new Error("both variances should be material (>=5000)");
   console.log(`materialRows=${v.materialRows.length} (expect >=2)`);
   if (v.materialRows.length < 2) throw new Error("expected material rows");
@@ -56,39 +58,16 @@ async function main() {
   console.log(`locked save → ok=${locked.ok} (expect false)`);
   if (locked.ok) throw new Error("locked budget should reject edits");
 
-  // Narrative save + read.
-  await upsertNote({ entityId: entity.id, reportingAccountId: revId, periodMonthISO: MONTH, text: "New engagement closed early.", aiDrafted: false });
+  // Narrative save + read, keyed by section (accountKey).
+  await upsertNote({ entityId: entity.id, accountKey: "Revenue", periodMonthISO: MONTH, text: "New engagement closed early.", aiDrafted: false });
   const notes = await notesForMonth(entity.id, MONTH);
-  console.log(`note saved: "${notes.get(revId)?.text}"`);
-  if (!notes.get(revId)) throw new Error("narrative not saved");
+  console.log(`note saved: "${notes.get("Revenue")?.text}"`);
+  if (!notes.get("Revenue")) throw new Error("narrative not saved");
 
   console.log(`\nnarrativesConfigured=${narrativesConfigured()} (AI draft ${narrativesConfigured() ? "available" : "off"})`);
 
-  // QBO budget parser (pure — no network): a sample query response → lines.
-  const { parseQboBudgets } = await import("@/lib/pace/qbo");
-  const parsed = parseQboBudgets({
-    QueryResponse: {
-      Budget: [
-        {
-          Name: "FY2026 Plan",
-          BudgetDetail: [
-            // Numeric, string-with-commas, and plain-string amounts must all coerce.
-            { BudgetDate: "2026-01-01", Amount: 15000, AccountRef: { value: "82", name: "Consulting Income" } },
-            { BudgetDate: "2026-02-01", Amount: "16,000", AccountRef: { value: "82", name: "Consulting Income" } },
-            { BudgetDate: "2026-01-01", Amount: "7000", AccountRef: { value: "60", name: "Payroll" } },
-          ],
-        },
-      ],
-    },
-  });
-  const total = parsed[0]?.lines.reduce((s, l) => s + l.amount, 0) ?? 0;
-  console.log(`parseQboBudgets → ${parsed.length} budget(s), "${parsed[0]?.name}", ${parsed[0]?.lines.length} lines, first month ${parsed[0]?.lines[0]?.month}, total $${total}`);
-  if (parsed.length !== 1 || parsed[0].lines.length !== 3 || parsed[0].lines[0].month !== "2026-01") {
-    throw new Error("QBO budget parser output wrong");
-  }
-  if (total !== 38000) throw new Error(`QBO budget amounts not coerced (expected 38000, got ${total})`);
-
-  // General ledger: parse a GeneralLedger report fixture → import → query.
+  // General ledger: parse a GeneralLedger report fixture → import → query by
+  // source account (the drill path is now ledgerAccountId, not reporting).
   const { parseGeneralLedger } = await import("@/lib/pace/qbo");
   const col = (title: string, type: string) => ({ ColTitle: title, ColType: type, MetaData: [{ Name: "ColKey", Value: type }] });
   const glReport = {
@@ -125,20 +104,21 @@ async function main() {
     throw new Error("parseGeneralLedger output wrong");
   }
 
-  // Import + query round-trip: a source account (externalId 82) mapped to revenue.
+  // Import + query round-trip: a source account (externalId 82), QBO Income type.
   const { importGeneralLedger, queryGeneralLedger, glMonths } = await import("@/lib/pace/gl");
-  await prisma.ledgerAccount.create({
-    data: { entityId: entity.id, externalId: "82", name: "Consulting Income", acctNum: "4010", mappedReportingAccountId: revId },
+  const glAcct = await prisma.ledgerAccount.create({
+    data: { entityId: entity.id, externalId: "82", name: "Consulting Income", acctNum: "4010", sourceType: "Income" },
   });
   const glImp = await importGeneralLedger({ entityId: entity.id, periodMonthISO: MONTH, lines: glLines });
   console.log(`importGeneralLedger → count=${glImp.count} unresolved=${glImp.unresolved}`);
   if (glImp.count !== 2 || glImp.unresolved !== 0) throw new Error("GL import did not resolve accounts");
-  const glQ = await queryGeneralLedger({ entityId: entity.id, reportingAccountId: revId, fromMonth: "2026-07", toMonth: "2026-07" });
-  console.log(`queryGeneralLedger(revenue) → ${glQ.count} rows, total $${glQ.total}, first "${glQ.rows[0]?.name}"`);
-  if (glQ.count !== 2 || glQ.total !== -20000) throw new Error("GL query by reporting account wrong");
+  const glQ = await queryGeneralLedger({ entityId: entity.id, ledgerAccountId: glAcct.id, fromMonth: "2026-07", toMonth: "2026-07" });
+  console.log(`queryGeneralLedger(source acct) → ${glQ.count} rows, total $${glQ.total}, type "${glQ.rows[0]?.accountType}"`);
+  if (glQ.count !== 2 || glQ.total !== -20000) throw new Error("GL query by source account wrong");
+  if (glQ.rows[0]?.accountType !== "Income") throw new Error("GL row should carry QBO account type");
   // Idempotent: re-import the same month replaces (still 2, not 4).
   await importGeneralLedger({ entityId: entity.id, periodMonthISO: MONTH, lines: glLines });
-  const glQ2 = await queryGeneralLedger({ entityId: entity.id, reportingAccountId: revId });
+  const glQ2 = await queryGeneralLedger({ entityId: entity.id, ledgerAccountId: glAcct.id });
   if (glQ2.count !== 2) throw new Error("GL re-import should replace the month, not duplicate");
   const gm = await glMonths(entity.id);
   console.log(`glMonths → ${gm.join(", ")} (expect 2026-07)`);
@@ -157,7 +137,7 @@ async function main() {
 
   await prisma.entity.delete({ where: { id: entity.id } }).catch(() => {});
   console.log("cleaned up throwaway entity");
-  console.log("\n✅ PACE Phase 2 smoke passed");
+  console.log("\n✅ PACE Phase 2 (QBO-native BvA) smoke passed");
 }
 
 main().catch((e) => { console.error("❌", e); process.exit(1); }).finally(() => prisma.$disconnect());

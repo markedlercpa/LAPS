@@ -1,7 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { queryGeneralLedger, glMonths } from "@/lib/pace/gl";
-import { listReportingAccounts } from "@/lib/pace/coa";
 import { formatCurrency } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -18,13 +17,19 @@ export default async function LedgerPage({
 }) {
   const sp = await searchParams;
 
-  const [entities, months, reporting] = await Promise.all([
+  const entitySelRaw = sp.entity ?? "all";
+
+  const [entities, months, accounts] = await Promise.all([
     prisma.entity.findMany({ where: { active: true }, orderBy: { createdAt: "asc" }, select: { id: true, name: true } }),
     glMonths(),
-    listReportingAccounts(),
+    prisma.ledgerAccount.findMany({
+      where: { active: true, ...(entitySelRaw !== "all" ? { entityId: entitySelRaw } : {}) },
+      orderBy: [{ acctNum: "asc" }, { name: "asc" }],
+      select: { id: true, acctNum: true, name: true, sourceType: true },
+    }),
   ]);
 
-  const entitySel = sp.entity ?? "all";
+  const entitySel = entitySelRaw;
   const accountSel = sp.account ?? "";
   const fromSel = sp.from ?? (months[months.length - 1] ?? "");
   const toSel = sp.to ?? (months[0] ?? "");
@@ -33,12 +38,20 @@ export default async function LedgerPage({
   const { rows, total, count } = hasData
     ? await queryGeneralLedger({
         entityId: entitySel === "all" ? null : entitySel,
-        reportingAccountId: accountSel || undefined,
+        ledgerAccountId: accountSel || undefined,
         fromMonth: fromSel || undefined,
         toMonth: toSel || undefined,
         limit: 1000,
       })
     : { rows: [], total: 0, count: 0 };
+
+  // Group source accounts by QBO AccountType for the picker.
+  const accountsByType = new Map<string, { id: string; acctNum: string | null; name: string }[]>();
+  for (const a of accounts) {
+    const t = a.sourceType || "Other";
+    if (!accountsByType.has(t)) accountsByType.set(t, []);
+    accountsByType.get(t)!.push({ id: a.id, acctNum: a.acctNum, name: a.name });
+  }
 
   return (
     <div>
@@ -66,19 +79,16 @@ export default async function LedgerPage({
               </select>
             </label>
             <label className="field">
-              <span className="micro-label">Reporting account</span>
+              <span className="micro-label">Account</span>
               <select name="account" defaultValue={accountSel} className="input">
                 <option value="">All accounts</option>
-                <optgroup label="Income Statement">
-                  {reporting.filter((r) => r.statement === "IS").map((r) => (
-                    <option key={r.id} value={r.id}>{r.code ? `${r.code} · ` : ""}{r.name}</option>
-                  ))}
-                </optgroup>
-                <optgroup label="Balance Sheet">
-                  {reporting.filter((r) => r.statement === "BS").map((r) => (
-                    <option key={r.id} value={r.id}>{r.code ? `${r.code} · ` : ""}{r.name}</option>
-                  ))}
-                </optgroup>
+                {Array.from(accountsByType.entries()).map(([type, accts]) => (
+                  <optgroup key={type} label={type}>
+                    {accts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.acctNum ? `${a.acctNum} · ` : ""}{a.name}</option>
+                    ))}
+                  </optgroup>
+                ))}
               </select>
             </label>
             <label className="field">
@@ -121,7 +131,7 @@ export default async function LedgerPage({
                     <th>Name</th>
                     <th>Memo</th>
                     <th>Account</th>
-                    <th>Reporting</th>
+                    <th>Type</th>
                     <th className="num">Amount</th>
                   </tr>
                 </thead>
@@ -137,7 +147,7 @@ export default async function LedgerPage({
                         {r.sourceAcctNum ? <span className="text-muted">{r.sourceAcctNum} · </span> : null}
                         {r.sourceAccount ?? "—"}
                       </td>
-                      <td className="text-muted">{r.reportingAccount ?? <span className="text-accent-700">unmapped</span>}</td>
+                      <td className="text-muted">{r.accountType ?? "—"}</td>
                       <td className="num">{formatCurrency(r.amount)}</td>
                     </tr>
                   ))}

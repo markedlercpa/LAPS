@@ -112,7 +112,7 @@ export default async function ReviewPage({
               <thead><tr><th>Account</th><th className="num">Amount</th></tr></thead>
               <tbody>
                 {is.lines.map((l) => (
-                  <tr key={l.reportingAccountId}><td>{l.name}</td><td className="num">{formatCurrency(l.amount)}</td></tr>
+                  <tr key={l.ledgerAccountId}><td>{l.name}</td><td className="num">{formatCurrency(l.amount)}</td></tr>
                 ))}
                 <tr><td className="font-heading font-extrabold">Net income</td><td className="num font-heading font-extrabold">{formatCurrency(is.subtotals.netIncome ?? 0)}</td></tr>
               </tbody>
@@ -130,12 +130,12 @@ export default async function ReviewPage({
                   <thead><tr><th>Account</th><th className="num">Actual</th><th className="num">Budget</th><th className="num">Variance</th><th>Explanation</th></tr></thead>
                   <tbody>
                     {variance.materialRows.map((r) => (
-                      <tr key={r.reportingAccountId}>
+                      <tr key={r.accountKey}>
                         <td>{r.name}</td>
                         <td className="num">{formatCurrency(r.actual)}</td>
                         <td className="num">{formatCurrency(r.budget)}</td>
                         <td className={`num ${r.favorable === false ? "text-accent" : "text-accent-700"}`}>{formatCurrency(r.varianceAmt)}</td>
-                        <td className="text-[13px]">{(notes.get(r.reportingAccountId) as { text: string } | undefined)?.text ?? <span className="text-muted">—</span>}</td>
+                        <td className="text-[13px]">{(notes.get(r.accountKey) as { text: string } | undefined)?.text ?? <span className="text-muted">—</span>}</td>
                       </tr>
                     ))}
                   </tbody>

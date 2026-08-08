@@ -4,7 +4,7 @@ import { formatCurrency } from "@/lib/utils";
 
 /**
  * Variance narratives — one-line explanations attached to a flagged variance
- * (entity + reporting account + month). Can be AI-drafted (Claude) then edited
+ * (entity + statement section + month). Can be AI-drafted (Claude) then edited
  * and saved by a human. Over time the monthly operating review writes itself.
  */
 
@@ -15,7 +15,7 @@ function monthDate(iso: string): Date {
 
 export async function upsertNote(input: {
   entityId: string;
-  reportingAccountId: string;
+  accountKey: string;
   periodMonthISO: string;
   text: string;
   aiDrafted?: boolean;
@@ -24,16 +24,16 @@ export async function upsertNote(input: {
   const periodMonth = monthDate(input.periodMonthISO);
   return prisma.varianceNote.upsert({
     where: {
-      entityId_reportingAccountId_periodMonth: {
+      entityId_accountKey_periodMonth: {
         entityId: input.entityId,
-        reportingAccountId: input.reportingAccountId,
+        accountKey: input.accountKey,
         periodMonth,
       },
     },
     update: { text: input.text, aiDrafted: input.aiDrafted ?? false, authorId: input.authorId ?? null },
     create: {
       entityId: input.entityId,
-      reportingAccountId: input.reportingAccountId,
+      accountKey: input.accountKey,
       periodMonth,
       text: input.text,
       aiDrafted: input.aiDrafted ?? false,
@@ -42,12 +42,12 @@ export async function upsertNote(input: {
   });
 }
 
-/** All variance notes for an entity/month, keyed by reportingAccountId. */
+/** All variance notes for an entity/month, keyed by accountKey (section). */
 export async function notesForMonth(entityId: string, periodMonthISO: string) {
   const notes = await prisma.varianceNote.findMany({
     where: { entityId, periodMonth: monthDate(periodMonthISO) },
   });
-  return new Map(notes.map((n) => [n.reportingAccountId, n]));
+  return new Map(notes.map((n) => [n.accountKey, n]));
 }
 
 export function narrativesConfigured(): boolean {

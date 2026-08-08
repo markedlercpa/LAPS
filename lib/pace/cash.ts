@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { isoWeekOf, isoWeekStart } from "@/lib/work-taxonomy";
 import { rateForBandWeek } from "@/lib/work/capacity";
-import { buildStatement, availableMonths } from "@/lib/pace/statements";
+import { latestBankCashCents } from "@/lib/pace/statements";
 import { CASH_CATEGORY_MAP, categoriesFor, type CashMode } from "@/lib/pace/cash-taxonomy";
 
 /**
@@ -94,13 +94,9 @@ function occurrences(line: LineLite, h0: Date, hN: Date): Date[] {
 }
 
 // ── Opening cash (auto from QB ledgers) ──────────────────────────────────────
+/** Latest consolidated cash = sum of QBO Bank-type accounts, in cents. */
 export async function latestCashActualCents(): Promise<{ cents: number; asOf: string } | null> {
-  const months = await availableMonths();
-  if (months.length === 0) return null;
-  const bs = await buildStatement(null, months[0], "BS");
-  const cash = bs.lines.find((l) => l.code === "1000");
-  if (!cash) return null;
-  return { cents: Math.round(cash.amount * 100), asOf: months[0].slice(0, 10) };
+  return latestBankCashCents();
 }
 
 async function effectiveOpening(config: Awaited<ReturnType<typeof getCashConfig>>): Promise<{ cents: number; auto: boolean; asOf: string | null }> {

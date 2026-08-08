@@ -1087,8 +1087,10 @@ model LedgerConnection {
   entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
 }
 
-/// Firm-standard reporting chart of accounts every entity COA maps to, so
-/// consolidated statements and cross-entity KPIs compare like with like.
+/// Firm-standard reporting chart of accounts, used as the budgeting dimension
+/// (budgets + budget-vs-actual roll up to these `type`s). Actuals are NOT mapped
+/// here — statements are rebuilt natively from QuickBooks' own AccountType /
+/// Classification (see lib/pace/qbo-taxonomy.ts).
 model ReportingAccount {
   id          String        @id @default(cuid())
   code        String?       @unique
@@ -1100,32 +1102,32 @@ model ReportingAccount {
   naturalSide NaturalSide
   sortOrder   Int           @default(0)
 
-  ledgerAccounts LedgerAccount[]
-  budgetLines    BudgetLine[]
-  varianceNotes  VarianceNote[]
+  budgetLines BudgetLine[]
 }
 
-/// A source account from an entity's ledger. Unmapped (null reporting account)
-/// = the exception queue — never silently dropped.
+/// A source account from an entity's ledger, carrying QuickBooks' descriptive
+/// metadata (AccountType/SubType/Classification + parent hierarchy) so PACE can
+/// rebuild the statements the way QBO organizes them — no manual COA mapping.
 model LedgerAccount {
-  id                       String   @id @default(cuid())
-  entityId                 String
-  externalId               String? // QBO account id
-  acctNum                  String? // QBO account number (AcctNum), for display + sort
-  name                     String
-  sourceType               String? // QBO AccountType / classification
-  mappedReportingAccountId String?
-  active                   Boolean  @default(true)
-  createdAt                DateTime @default(now())
+  id               String   @id @default(cuid())
+  entityId         String
+  externalId       String? // QBO account id
+  acctNum          String? // QBO account number (AcctNum), for display + sort
+  name             String
+  sourceType       String? // QBO AccountType (e.g. Bank, Income, Expense)
+  accountSubType   String? // QBO AccountSubType (e.g. Checking, ServiceFeeIncome)
+  classification   String? // QBO Classification (Asset/Liability/Equity/Revenue/Expense)
+  fqName           String? // QBO FullyQualifiedName ("Parent:Child") — hierarchy
+  parentExternalId String? // QBO ParentRef id, when a sub-account
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
 
-  entity           Entity              @relation(fields: [entityId], references: [id], onDelete: Cascade)
-  reportingAccount ReportingAccount?   @relation(fields: [mappedReportingAccountId], references: [id], onDelete: SetNull)
-  lines            TrialBalanceLine[]
-  glLines          GeneralLedgerLine[]
+  entity  Entity              @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  lines   TrialBalanceLine[]
+  glLines GeneralLedgerLine[]
 
   @@unique([entityId, externalId])
   @@index([entityId])
-  @@index([mappedReportingAccountId])
 }
 
 /// One entity's trial balance for one month.
@@ -1254,24 +1256,24 @@ model BudgetLine {
   @@index([budgetId])
 }
 
-/// A one-line explanation attached to a flagged variance (entity + reporting
-/// account + month). May be AI-drafted then human-approved. The monthly
-/// operating review is assembled from these over time.
+/// A one-line explanation attached to a flagged variance (entity + statement
+/// section + month). Budget-vs-actual is now section-level (Revenue, COGS,
+/// OpEx, …), so notes key on that section string. May be AI-drafted then
+/// human-approved. The monthly operating review is assembled from these.
 model VarianceNote {
-  id                 String   @id @default(cuid())
-  entityId           String
-  reportingAccountId String
-  periodMonth        DateTime @db.Date
-  text               String   @db.Text
-  aiDrafted          Boolean  @default(false)
-  authorId           String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id          String   @id @default(cuid())
+  entityId    String
+  accountKey  String // statement section / reporting `type` (e.g. "Revenue", "OpEx")
+  periodMonth DateTime @db.Date
+  text        String   @db.Text
+  aiDrafted   Boolean  @default(false)
+  authorId    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  entity           Entity           @relation(fields: [entityId], references: [id], onDelete: Cascade)
-  reportingAccount ReportingAccount @relation(fields: [reportingAccountId], references: [id], onDelete: Cascade)
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
 
-  @@unique([entityId, reportingAccountId, periodMonth])
+  @@unique([entityId, accountKey, periodMonth])
   @@index([entityId, periodMonth])
 }
 

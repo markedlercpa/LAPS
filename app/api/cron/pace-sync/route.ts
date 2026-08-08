@@ -35,7 +35,7 @@ async function handle(req: Request): Promise<Response> {
   let glLines = 0;
   const errors: string[] = [];
   for (const c of connected) {
-    // Refresh the chart of accounts (numbers + mapping) once per entity.
+    // Refresh the chart of accounts (numbers + QBO descriptive metadata) once per entity.
     await syncLedgerAccounts(c.entityId).catch(() => null);
     for (const month of months) {
       try {

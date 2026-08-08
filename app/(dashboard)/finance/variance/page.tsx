@@ -46,7 +46,7 @@ export default async function VariancePage({
     const source = exceptionOnly ? result.materialRows : result.rows.filter((r) => r.actual !== 0 || r.budget !== 0);
     viewRows = source.map((r) => ({
       ...r,
-      note: noteMap.get(r.reportingAccountId)?.text ?? null,
+      note: noteMap.get(r.accountKey)?.text ?? null,
     }));
   }
 

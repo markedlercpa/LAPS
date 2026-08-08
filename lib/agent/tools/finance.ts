@@ -1,13 +1,14 @@
 import { prisma } from "@/lib/prisma";
 import { type AgentTool, safeRevalidate, str, usd } from "@/lib/agent/tool-kit";
-import { listReportingAccounts, unmappedAccounts, mapAccount, ensureReportingCoaSeeded } from "@/lib/pace/coa";
+import { listReportingAccounts } from "@/lib/pace/coa";
 import { buildStatement, availableMonths } from "@/lib/pace/statements";
 import { buildDirectForecast, buildIndirectForecast } from "@/lib/pace/cash";
 import { qboConfigured, syncLedgerAccounts } from "@/lib/pace/qbo";
 
 /**
- * Finance (PACE) tools — entities, the reporting chart of accounts + the
- * COA-mapping exception queue, statements, budgets, and the cash forecast.
+ * Finance (PACE) tools — entities, statements (rebuilt natively from the
+ * QuickBooks chart of accounts, no mapping), the reporting COA (budget
+ * dimension), budgets, and the cash forecast.
  */
 
 const listEntities: AgentTool = {
@@ -32,7 +33,7 @@ const listEntities: AgentTool = {
 const listReportingCoa: AgentTool = {
   name: "finance_list_reporting_coa",
   description:
-    "List the firm-standard reporting chart of accounts (the mapping targets): code, name, statement (IS/BS), and type. Use to find the reportingAccountId or code to map a source account to.",
+    "List the firm-standard reporting chart of accounts used as the budgeting dimension (budgets + budget-vs-actual roll up to these): code, name, statement (IS/BS), and type. Actuals are NOT mapped here — statements come straight from QuickBooks' own account types.",
   mode: "read",
   input_schema: { type: "object", properties: {} },
   run: async () => {
@@ -45,76 +46,20 @@ const listReportingCoa: AgentTool = {
   },
 };
 
-const listUnmappedAccounts: AgentTool = {
-  name: "finance_list_unmapped_accounts",
-  description:
-    "List source ledger accounts that are NOT yet mapped to the reporting COA (the exception queue). Returns id, account number, name, and entity. These are what map_account resolves.",
-  mode: "read",
-  input_schema: {
-    type: "object",
-    properties: { entityId: { type: "string", description: "Optional entity filter." } },
-  },
-  run: async (input) => {
-    const rows = await unmappedAccounts(str(input, "entityId"));
-    return {
-      ok: true,
-      count: rows.length,
-      accounts: rows.map((a) => ({ id: a.id, acctNum: a.acctNum, name: a.name, entity: a.entity.name })),
-    };
-  },
-};
-
-const mapAccountTool: AgentTool = {
-  name: "finance_map_account",
-  description:
-    "Map a source ledger account to a reporting-COA account (resolves an exception-queue item). Give the source ledgerAccountId (from finance_list_unmapped_accounts) and EITHER a reportingAccountId or a reportingCode (e.g. '4000'). Pass reportingCode 'none' to unmap.",
-  mode: "write",
-  input_schema: {
-    type: "object",
-    properties: {
-      ledgerAccountId: { type: "string", description: "Source account id." },
-      reportingAccountId: { type: "string", description: "Target reporting account id (or use reportingCode)." },
-      reportingCode: { type: "string", description: "Target reporting account code, e.g. '4000'. 'none' unmaps." },
-    },
-    required: ["ledgerAccountId"],
-  },
-  confirmSummary: (i) =>
-    `Map source account ${str(i, "ledgerAccountId")} → reporting ${str(i, "reportingCode") ?? str(i, "reportingAccountId") ?? "?"}.`,
-  run: async (input) => {
-    await ensureReportingCoaSeeded();
-    const ledgerAccountId = str(input, "ledgerAccountId");
-    if (!ledgerAccountId) return { ok: false, error: "ledgerAccountId is required." };
-    let reportingAccountId: string | null = str(input, "reportingAccountId") ?? null;
-    const code = str(input, "reportingCode");
-    if (code && code.toLowerCase() === "none") reportingAccountId = null;
-    else if (!reportingAccountId && code) {
-      const ra = await prisma.reportingAccount.findUnique({ where: { code }, select: { id: true } });
-      if (!ra) return { ok: false, error: `No reporting account with code ${code}.` };
-      reportingAccountId = ra.id;
-    }
-    const acct = await prisma.ledgerAccount.findUnique({ where: { id: ledgerAccountId }, select: { id: true } });
-    if (!acct) return { ok: false, error: "Source ledger account not found." };
-    await mapAccount(ledgerAccountId, reportingAccountId);
-    safeRevalidate("/finance/mapping");
-    safeRevalidate("/finance/actuals");
-    return { ok: true, ledgerAccountId, reportingAccountId };
-  },
-};
-
 const syncAccounts: AgentTool = {
   name: "finance_sync_qbo_accounts",
   description:
-    "Pull the QuickBooks chart of accounts (with account numbers) into the mapping queue for every QBO-connected entity, so unmapped accounts appear for mapping. No-op if QBO isn't configured.",
+    "Refresh the QuickBooks chart of accounts (account numbers + AccountType/SubType/Classification + hierarchy) for every QBO-connected entity. This descriptive metadata is what the statements are built from. No-op if QBO isn't configured.",
   mode: "write",
   input_schema: { type: "object", properties: {} },
-  confirmSummary: () => "Sync the QuickBooks chart of accounts into the mapping queue.",
+  confirmSummary: () => "Refresh the QuickBooks chart of accounts (descriptive metadata) for connected entities.",
   run: async () => {
     if (!qboConfigured()) return { ok: false, error: "QuickBooks is not configured." };
     const conns = await prisma.ledgerConnection.findMany({ where: { provider: "QBO", status: "connected" }, select: { entityId: true } });
     if (conns.length === 0) return { ok: false, error: "No QBO-connected entities." };
     let synced = 0;
     for (const c of conns) synced += (await syncLedgerAccounts(c.entityId)) ?? 0;
-    safeRevalidate("/finance/mapping");
+    safeRevalidate("/finance/actuals");
     return { ok: true, synced };
   },
 };
@@ -122,7 +67,7 @@ const syncAccounts: AgentTool = {
 const getStatement: AgentTool = {
   name: "finance_get_statement",
   description:
-    "Get a financial statement (income statement or balance sheet) for an entity (or consolidated) and month, rolled up through the reporting COA. Month is 'YYYY-MM'; omit for the latest loaded month.",
+    "Get a financial statement (income statement or balance sheet) for an entity (or consolidated) and month, rebuilt natively from the QuickBooks chart of accounts. Month is 'YYYY-MM'; omit for the latest loaded month.",
   mode: "read",
   input_schema: {
     type: "object",
@@ -148,8 +93,12 @@ const getStatement: AgentTool = {
       month: month.slice(0, 7),
       consolidated,
       subtotals: s.subtotals,
-      unmappedAmount: s.unmappedAmount,
-      lines: s.lines.map((l) => ({ code: l.code, name: l.name, amount: l.amount })),
+      unclassifiedAmount: s.unclassifiedAmount,
+      sections: s.groups.map((g) => ({
+        section: g.label,
+        subtotal: g.subtotal,
+        lines: g.lines.map((l) => ({ acctNum: l.acctNum, name: l.name, accountType: l.accountType, amount: l.amount })),
+      })),
     };
   },
 };
@@ -210,10 +159,8 @@ const getCashForecast: AgentTool = {
 export const FINANCE_TOOLS: AgentTool[] = [
   listEntities,
   listReportingCoa,
-  listUnmappedAccounts,
   getStatement,
   listBudgets,
   getCashForecast,
-  mapAccountTool,
   syncAccounts,
 ];

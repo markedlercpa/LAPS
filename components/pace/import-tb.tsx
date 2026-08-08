@@ -26,7 +26,7 @@ export function ImportTbButton({ entityId }: { entityId: string }) {
       if (res.ok) {
         setOk(true);
         setMsg(
-          `Imported ${res.unmapped === 0 ? "" : `(${res.unmapped} unmapped) `}· ${res.balanced ? "balanced" : `OUT OF BALANCE by ${res.imbalance?.toFixed(2)}`}.`,
+          `Imported ${res.unclassified === 0 ? "" : `(${res.unclassified} unclassified) `}· ${res.balanced ? "balanced" : `OUT OF BALANCE by ${res.imbalance?.toFixed(2)}`}.`,
         );
         router.refresh();
       } else {
@@ -63,11 +63,11 @@ export function ImportTbButton({ entityId }: { entityId: string }) {
               className="input font-mono text-[12px]"
               rows={10}
               required
-              placeholder={"account name, debit, credit [, reportingCode]\nOR\naccount name, signed amount [, reportingCode]\n\nCash, 120000, 0, 1000\nAccounts Receivable, 48000, 0, 1100\nRevenue, 0, 210000, 4100\nPayroll, 90000, 0, 6000\n\n(no thousands separators; debit positive, credit reduces)"}
+              placeholder={"account name, debit, credit [, AccountType]\nOR\naccount name, signed amount [, AccountType]\n\nCash, 120000, 0, Bank\nAccounts Receivable, 48000, 0, Accounts Receivable\nRevenue, 0, 210000, Income\nPayroll, 90000, 0, Expense\n\n(no thousands separators; debit positive, credit reduces)"}
             />
           </label>
           <p className="text-[12px] text-muted">
-            The optional last column is a reporting-COA code (see COA mapping) — accounts without one land in the exception queue.
+            The optional last column is a QuickBooks AccountType (Bank, Income, Expense, …) so the row lands on the right statement — accounts without one show under “Unclassified.” A QBO sync fills this in automatically.
           </p>
           {msg && <p className={`text-[13px] ${ok ? "text-accent-700" : "text-accent-700"}`}>{msg}</p>}
           <div className="flex justify-end gap-2">

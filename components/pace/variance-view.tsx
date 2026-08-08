@@ -62,7 +62,7 @@ export function VarianceView({
           <tbody>
             {rows.map((r) => (
               <Row
-                key={r.reportingAccountId}
+                key={r.accountKey}
                 r={r}
                 entityId={entityId}
                 entityName={entityName}
@@ -134,7 +134,7 @@ function Row({
   function save() {
     if (!text.trim()) return;
     startTransition(async () => {
-      await saveNarrativeAction({ entityId, reportingAccountId: r.reportingAccountId, periodMonthISO, text, aiDrafted });
+      await saveNarrativeAction({ entityId, accountKey: r.accountKey, periodMonthISO, text, aiDrafted });
       setEditing(false);
       router.refresh();
     });
