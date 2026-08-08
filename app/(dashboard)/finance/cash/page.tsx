@@ -68,8 +68,10 @@ function AutoFeedNote({ f, mode }: { f: Awaited<ReturnType<typeof buildDirectFor
     body = <>QuickBooks isn&apos;t configured, so <strong>AR Collections</strong> and <strong>AP Payments</strong> aren&apos;t auto-fed. Connect QBO, or add lines under <Link className="text-accent-700" href="/finance/cash/assumptions">Assumptions</Link>.</>;
   } else if (s.qboConnectedEntities === 0) {
     body = <>No QBO-connected entity — AR/AP aging can&apos;t be pulled. Connect one under <Link className="text-accent-700" href="/finance/entities">Entities</Link>.</>;
+  } else if (s.arParsed === 0 && s.apParsed === 0) {
+    body = <>QuickBooks is connected but the aging reports returned <strong>no line items</strong> the parser could read — likely a report-shape difference. This is a mapping issue to fix, not a windowing one; flag it and I&apos;ll adjust.</>;
   } else if (s.arItems === 0 && s.apItems === 0) {
-    body = <>QuickBooks is connected but no open AR/AP items landed in this {mode === "daily" ? "14-day" : "13-week"} window. Most invoices sit further out — try the <strong>13-week</strong> view (overdue items land in the first period).</>;
+    body = <>QuickBooks returned {s.arParsed} AR + {s.apParsed} AP open items, but none fall inside this {mode === "daily" ? "14-day" : "13-week"} window (all due further out, nothing overdue). Widen the horizon or check the due dates.</>;
   } else {
     body = (
       <>

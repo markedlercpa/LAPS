@@ -115,7 +115,9 @@ export type StatementGroup = { title: string; rows: StatementRow[]; subtotalLabe
 export type CashSources = {
   qboConfigured: boolean;
   qboConnectedEntities: number;
-  arItems: number;
+  arParsed: number; // open AR items returned by QBO (before windowing)
+  apParsed: number;
+  arItems: number; // AR items that landed inside the forecast horizon
   apItems: number;
   arCents: number; // total AR spread into the horizon
   apCents: number; // total AP spread into the horizon
@@ -213,7 +215,7 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
   // Auto: AR / AP aging detail from QBO, spread into collections / disbursements
   // by due date (overdue lands in the first column, beyond-horizon drops off).
   // Auto-fed but overridable — manual assumption lines layer on top.
-  const sources: CashSources = { qboConfigured: qboConfigured(), qboConnectedEntities: 0, arItems: 0, apItems: 0, arCents: 0, apCents: 0, wipCents: 0 };
+  const sources: CashSources = { qboConfigured: qboConfigured(), qboConnectedEntities: 0, arParsed: 0, apParsed: 0, arItems: 0, apItems: 0, arCents: 0, apCents: 0, wipCents: 0 };
   const spreadAging = (items: AgingItem[], target: string, sign: 1 | -1): { items: number; cents: number } => {
     let placed = 0;
     let cents = 0;
@@ -237,8 +239,8 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
     sources.qboConnectedEntities = conns.length;
     for (const c of conns) {
       const [ar, ap] = await Promise.all([pullArAging(c.entityId), pullApAging(c.entityId)]);
-      if (ar) { const r = spreadAging(ar, "ar_collections", 1); sources.arItems += r.items; sources.arCents += r.cents; }
-      if (ap) { const r = spreadAging(ap, "ap_payments", -1); sources.apItems += r.items; sources.apCents += r.cents; }
+      if (ar) { sources.arParsed += ar.length; const r = spreadAging(ar, "ar_collections", 1); sources.arItems += r.items; sources.arCents += r.cents; }
+      if (ap) { sources.apParsed += ap.length; const r = spreadAging(ap, "ap_payments", -1); sources.apItems += r.items; sources.apCents += r.cents; }
     }
   }
 

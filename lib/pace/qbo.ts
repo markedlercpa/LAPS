@@ -618,52 +618,87 @@ export type AgingItem = {
   amount: number; // open balance, positive
 };
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}/;
+const numAging = (s?: string) => Number(String(s ?? "").replace(/[,$()]/g, "")) || 0;
+
 /**
  * Parse a QBO AgedReceivableDetail / AgedPayableDetail report into flat open
- * items with their due dates. Columns are matched by key (order varies); the
- * open amount prefers the "open_bal"/"subt_open_bal" column, else "amount".
+ * items with their due dates. QBO's column keys and layout vary by company and
+ * report, so this detects column ROLES by content (which columns hold dates vs.
+ * money) rather than trusting key names, using the report's ColKeys only as a
+ * hint for which date column is the due date. Customer/vendor is carried down
+ * from section headers. Robust to unknown ColKeys — the reason a keyed parse
+ * can silently yield zero.
  */
 export function parseAgingDetail(report: QboReportFull): AgingItem[] {
   const cols = report.Columns?.Column ?? [];
   const idx = columnIndex(cols);
-  const pick = (keys: string[]): number | undefined => {
+  const keyed = (keys: string[]): number | undefined => {
     for (const k of keys) if (idx[k] !== undefined) return idx[k];
     return undefined;
   };
-  const iDate = pick(["tx_date", "date"]);
-  const iDue = pick(["due_date", "duedate"]);
-  const iName = pick(["cust_name", "name", "vend_name", "customer", "vendor"]);
-  const iDoc = pick(["doc_num"]);
-  // The open-amount column key varies across QBO aging reports; if none of the
-  // known keys match, fall back to the last column (aging detail puts the open
-  // balance last).
-  const iAmt = pick(["open_bal", "subt_open_bal", "open_balance", "amount", "subt_nat_amount", "nat_open_bal"]) ?? (cols.length ? cols.length - 1 : undefined);
-  const num = (s?: string) => Number(String(s ?? "").replace(/[,$]/g, "")) || 0;
-  const out: AgingItem[] = [];
+  const iName = keyed(["cust_name", "vend_name", "name", "customer", "vendor"]);
+  const iDoc = keyed(["doc_num"]);
+  const dueHint = keyed(["due_date", "duedate"]);
 
-  // Customer/vendor is often a section header, not a column — carry it down.
+  // Flatten every ColData row (carrying the section-header name), so we can both
+  // infer column roles and emit items in one structure.
+  type Flat = { name: string; cells: (string | undefined)[] };
+  const flat: Flat[] = [];
   const walk = (rows: QboRow[] | undefined, groupName: string) => {
     for (const r of rows ?? []) {
       const header = (r as { Header?: { ColData?: QboColData[] } }).Header;
       const name = header?.ColData?.[0]?.value?.trim() || groupName;
-      if (r.ColData && iAmt !== undefined) {
-        const amount = num(r.ColData[iAmt]?.value);
-        const date = iDate !== undefined ? r.ColData[iDate]?.value?.trim() : undefined;
-        const isDataRow = iDate === undefined || /^\d{4}-\d{2}-\d{2}/.test(date ?? "");
-        if (Math.abs(amount) >= 0.005 && isDataRow) {
-          out.push({
-            name: (iName !== undefined ? r.ColData[iName]?.value?.trim() : "") || name || "—",
-            docNumber: iDoc !== undefined ? r.ColData[iDoc]?.value?.trim() || undefined : undefined,
-            txnDate: date ? date.slice(0, 10) : undefined,
-            dueDate: iDue !== undefined ? r.ColData[iDue]?.value?.trim()?.slice(0, 10) || undefined : undefined,
-            amount,
-          });
-        }
+      if (r.ColData && r.ColData.length > 1) {
+        flat.push({ name, cells: r.ColData.map((c) => c?.value?.trim()) });
       }
       if (r.Rows?.Row) walk(r.Rows.Row, name);
     }
   };
   walk(report.Rows?.Row, "");
+  if (flat.length === 0) return [];
+
+  // Column-role inference: count, per column, how many cells look like dates vs.
+  // numbers. Date columns are those with dates; the money column is the
+  // right-most mostly-numeric column (open balance sits last in aging detail).
+  const width = Math.max(...flat.map((f) => f.cells.length));
+  const dateHits = new Array(width).fill(0);
+  const numHits = new Array(width).fill(0);
+  for (const f of flat) {
+    for (let j = 0; j < width; j++) {
+      const v = f.cells[j];
+      if (!v) continue;
+      if (DATE_RE.test(v)) dateHits[j] += 1;
+      else if (/\d/.test(v) && !Number.isNaN(numAging(v)) && numAging(v) !== 0) numHits[j] += 1;
+    }
+  }
+  const dateCols: number[] = [];
+  for (let j = 0; j < width; j++) if (dateHits[j] >= Math.max(1, flat.length * 0.3)) dateCols.push(j);
+  let amountCol = -1;
+  for (let j = width - 1; j >= 0; j--) {
+    if (numHits[j] >= Math.max(1, flat.length * 0.3) && !dateCols.includes(j)) { amountCol = j; break; }
+  }
+  if (amountCol < 0) return [];
+
+  const txnCol = dateCols[0];
+  const dueCol = dueHint !== undefined && dateCols.includes(dueHint) ? dueHint : dateCols[dateCols.length - 1] ?? txnCol;
+
+  const out: AgingItem[] = [];
+  for (const f of flat) {
+    const amount = numAging(f.cells[amountCol]);
+    if (Math.abs(amount) < 0.005) continue; // skip subtotal/blank rows
+    const txnDate = txnCol !== undefined ? f.cells[txnCol]?.slice(0, 10) : undefined;
+    const dueDate = dueCol !== undefined ? f.cells[dueCol]?.slice(0, 10) : undefined;
+    // A real open item has at least one date; total rows carry an amount but no date.
+    if (!txnDate && !dueDate) continue;
+    out.push({
+      name: (iName !== undefined ? f.cells[iName] : "") || f.name || "—",
+      docNumber: iDoc !== undefined ? f.cells[iDoc] || undefined : undefined,
+      txnDate: txnDate && DATE_RE.test(txnDate) ? txnDate : undefined,
+      dueDate: dueDate && DATE_RE.test(dueDate) ? dueDate : undefined,
+      amount,
+    });
+  }
   return out;
 }
 
@@ -681,7 +716,20 @@ async function pullAgingReport(entityId: string, report: "AgedReceivableDetail" 
       console.error(`QBO ${report} failed:`, res.status);
       return null;
     }
-    return parseAgingDetail((await res.json()) as QboReportFull);
+    const doc = (await res.json()) as QboReportFull;
+    const items = parseAgingDetail(doc);
+    // Diagnostic: if the report came back but parsed to nothing, log its column
+    // shape + a sample row so a report-layout mismatch is fixable from the logs.
+    if (items.length === 0) {
+      const colSummary = (doc.Columns?.Column ?? []).map((c) => ({
+        title: c.ColTitle,
+        type: c.ColType,
+        key: c.MetaData?.find((m) => m.Name === "ColKey")?.Value,
+      }));
+      const firstRow = doc.Rows?.Row?.[0];
+      console.error(`QBO ${report}: parsed 0 items. columns=${JSON.stringify(colSummary)} sampleRow=${JSON.stringify(firstRow)?.slice(0, 600)}`);
+    }
+    return items;
   } catch (err) {
     console.error(`QBO ${report} error:`, err);
     return null;
