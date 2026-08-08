@@ -14,6 +14,7 @@ import {
 import { logTime, deleteTimeEntry } from "@/lib/work/time";
 import { requestBooking, confirmBooking, declineBooking, releaseBooking, editBookingHours } from "@/lib/work/bookings";
 import { closeWeek } from "@/lib/work/weekclose";
+import { addPnlAdjustment } from "@/lib/work/pnl";
 import { ENGAGEMENT_TYPES } from "@/lib/work-taxonomy";
 
 async function requireUser() {
@@ -234,4 +235,25 @@ export async function closeWeekAction(isoWeek: string) {
     revalidatePath("/work/capacity/engagements");
   }
   return res;
+}
+
+const adjustmentSchema = z.object({
+  portfolioId: z.string().min(1),
+  amount: z.coerce.number(), // dollars, signed
+  memo: z.string().min(1, "Memo is required"),
+});
+
+export async function addPnlAdjustmentAction(input: unknown) {
+  const userId = await requireUser();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+  const parsed = adjustmentSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  await addPnlAdjustment({
+    portfolioId: parsed.data.portfolioId,
+    amountCents: Math.round(parsed.data.amount * 100),
+    memo: parsed.data.memo,
+    createdBy: userId,
+  });
+  revalidatePath(`/work/capacity/portfolios/${parsed.data.portfolioId}`);
+  return { ok: true as const };
 }

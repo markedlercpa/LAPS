@@ -19,6 +19,8 @@ import { isoWeekOf, isoWeekStart } from "@/lib/work-taxonomy";
 import { logTime, deleteTimeEntry } from "@/lib/work/time";
 import { requestBooking, confirmBooking, releaseBooking, isPastCutoff, weekIsClosed } from "@/lib/work/bookings";
 import { computeWeekCharges, closeWeek } from "@/lib/work/weekclose";
+import { portfolioPnl, addPnlAdjustment } from "@/lib/work/pnl";
+import { poolMetrics } from "@/lib/work/metrics";
 
 async function main() {
   // ISO week helpers (pure).
@@ -45,6 +47,10 @@ async function main() {
   console.log(`Associate rate 2026-W01=${rEarly?.loadedRateCents} (80), 2026-W33=${rLate?.loadedRateCents} (90)`);
   if (rEarly?.loadedRateCents !== 8000 || rLate?.loadedRateCents !== 9000) throw new Error("effective-dated rate lookup wrong");
   await addRoleBandRate({ roleBandId: mgr.id, loadedRateCents: 15000, effectiveFrom: "2025-01-01" });
+
+  // Pre-clean any leftovers from a crashed prior run (globally-unique keys).
+  await prisma.poolResource.deleteMany({ where: { email: { in: ["ana@example.com", "maher@example.com"] } } });
+  await prisma.portfolio.deleteMany({ where: { name: "ZZZ Cap Test" } });
 
   // Portfolio + engagement + budget.
   const pf = await createPortfolio({ name: "ZZZ Cap Test", directorName: "Dir", directorEmail: "dir@example.com", declaredPortfolioRevenueCents: 50_000_00, gpTargetPct: 0.5 });
@@ -128,6 +134,8 @@ async function main() {
   if (!relPast.ok || !relPast.charged) throw new Error("past-cutoff release should still charge");
 
   // Week close: 2026-W33 has 10h consumed @ $90 + 5h director @ $0 = $900 consumed labor.
+  // (WeekClose is keyed globally by ISO week — clear any leftover from a prior run.)
+  await prisma.weekClose.deleteMany({ where: { isoWeek: "2026-W33" } });
   const preview = await computeWeekCharges("2026-W33");
   console.log(`W33 charges preview: $${(preview.totalCents / 100).toFixed(2)} (expect 900)`);
   if (preview.totalCents !== 90000) throw new Error(`W33 charge should be $900, got ${preview.totalCents}`);
@@ -143,7 +151,38 @@ async function main() {
   console.log(`W44 booked-unused: $${((pfCharge?.bookedUnusedCents ?? 0) / 100).toFixed(2)} (expect 900)`);
   if ((pfCharge?.bookedUnusedCents ?? 0) !== 90000) throw new Error("booked-unused charge wrong");
 
+  // ── Phase 3: Portfolio P&L + bonus + hoarding ──
+  // Give the portfolio a declared book + director base so the bonus math is live.
+  await prisma.portfolio.update({
+    where: { id: pf.id },
+    data: { declaredPortfolioRevenueCents: 2_400_000_00, directorCostCentsAnnual: 120_000_00, gpTargetPct: 0.5, parBonusPct: 0.05 },
+  });
+  await addPnlAdjustment({ portfolioId: pf.id, amountCents: -50_00, memo: "test write-off" });
+
+  const pnl = (await portfolioPnl(pf.id))!;
+  console.log(
+    `pnl: recognized=$${(pnl.recognizedRevenueCents / 100).toFixed(0)} labor=$${(pnl.consumedLaborCents / 100).toFixed(0)} ` +
+      `bookedUnused=$${(pnl.bookedUnusedCents / 100).toFixed(0)} adj=$${(pnl.adjustmentsCents / 100).toFixed(0)} GP=$${(pnl.grossProfitCents / 100).toFixed(0)}`,
+  );
+  // GP = recognized − labor − bookedUnused − directorBase + adjustments.
+  const expectedGp =
+    pnl.recognizedRevenueCents - pnl.consumedLaborCents - pnl.bookedUnusedCents - pnl.directorCostCents + pnl.adjustmentsCents;
+  if (pnl.grossProfitCents !== expectedGp) throw new Error("portfolio GP identity broke");
+  if (pnl.adjustmentsCents !== -5000) throw new Error("adjustment not applied");
+  if (pnl.bonus.parBonusCents !== 12_000_000) throw new Error(`par bonus should be $120k, got ${pnl.bonus.parBonusCents}`);
+  // GP is deeply negative to date (full annual base vs. tiny recognized) → below cliff → $0 payout.
+  console.log(`bonus: par=$${(pnl.bonus.parBonusCents / 100).toFixed(0)} attainment=${pnl.bonus.attainment} payout=$${(pnl.bonus.payoutCents / 100).toFixed(0)} cliff=${pnl.bonus.cliffApplied}`);
+  if (pnl.bonus.attainment == null) throw new Error("attainment should compute");
+  if (pnl.bonus.cliffApplied && pnl.bonus.payoutCents !== 0) throw new Error("cliff should zero the payout");
+  console.log(`hoarding: ratio=${pnl.hoarding.ratio} band=${pnl.hoarding.band}`);
+
+  // Pool metrics smoke.
+  const met = await poolMetrics();
+  console.log(`metrics: ${met.weeks.length} forward weeks, ${met.resources.length} resources, unbooked=${met.unbookedCount}, benchAlert=${met.benchAlert}`);
+  if (met.weeks.length !== 8) throw new Error("expected 8 forward weeks");
+
   // Cleanup.
+  await prisma.weekClose.deleteMany({ where: { isoWeek: { in: ["2026-W33", "2026-W44", "2026-W50", "2026-W51", "2026-W01"] } } }).catch(() => {});
   await prisma.poolResource.delete({ where: { id: dir.id } }).catch(() => {});
   await prisma.portfolio.delete({ where: { id: pf.id } }).catch(() => {});
   await prisma.poolResource.delete({ where: { id: res.id } }).catch(() => {});

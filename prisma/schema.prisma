@@ -1367,8 +1367,24 @@ model Portfolio {
 
   engagements PortfolioEngagement[]
   bookings    CapacityBooking[]
+  adjustments PnlAdjustment[]
 
   @@index([active])
+}
+
+/// Manual P&L journal for a portfolio (write-offs, cross-portfolio corrections).
+model PnlAdjustment {
+  id          String    @id @default(cuid())
+  portfolioId String
+  periodMonth DateTime? @db.Date // optional month tag; null = general
+  amountCents Int // signed: positive adds to GP, negative reduces it
+  memo        String
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@index([portfolioId])
 }
 
 /// A client work item (mirrors a Karbon work item). Belongs to one Portfolio,

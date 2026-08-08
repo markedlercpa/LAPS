@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { NewPortfolioButton } from "@/components/work/new-portfolio";
@@ -46,7 +47,9 @@ export default async function PortfoliosPage() {
               });
               return (
                 <tr key={p.id}>
-                  <td className="font-heading font-extrabold">{p.name}</td>
+                  <td className="font-heading font-extrabold">
+                    <Link href={`/work/capacity/portfolios/${p.id}`} className="text-accent-700">{p.name}</Link>
+                  </td>
                   <td className="text-muted">{p.directorName}</td>
                   <td className="num">{centsToUsd(p.declaredPortfolioRevenueCents)}</td>
                   <td className="num">
