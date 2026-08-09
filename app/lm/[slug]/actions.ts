@@ -1,0 +1,169 @@
+"use server";
+
+import { prisma } from "@/lib/prisma";
+import { captureSubmission, type CaptureInput, type CaptureResult } from "@/lib/leadmagnets/capture";
+import { recordMagnetView } from "@/lib/leadmagnets/magnets";
+import { asQuizConfig, scoreQuiz, type QuizBand } from "@/lib/leadmagnets/quiz";
+import { asAuditConfig, scoreAudit, qualifies } from "@/lib/leadmagnets/audit";
+import { asCalculatorConfig, computeCalculator } from "@/lib/leadmagnets/calculator";
+import { asSnapshotConfig, computeSnapshot, type SnapshotInputs, type SnapshotResult } from "@/lib/leadmagnets/snapshot";
+
+/** Public (unauthenticated) lead-magnet capture. Runs the Content → Leads
+ * bridge and returns download access for file magnets. */
+export async function captureMagnetAction(input: CaptureInput): Promise<CaptureResult> {
+  return captureSubmission(input);
+}
+
+/** Record a landing-page view (conversion denominator). Fired once per load. */
+export async function recordMagnetViewAction(input: { slug: string; source?: string | null; contentItemId?: string | null }) {
+  return recordMagnetView(input.slug, input.source, input.contentItemId);
+}
+
+export type QuizResult =
+  | { ok: false; error: string }
+  | { ok: true; score: number; max: number; band: QuizBand | null; bookingSlug: string | null };
+
+/** Public quiz submission: score the answers, resolve the band, run the same
+ * capture bridge (with the quiz score folded into the lead's trust score), and
+ * return the result for the on-screen + printable results page. */
+export async function captureQuizAction(input: {
+  slug: string;
+  email: string;
+  name?: string | null;
+  company?: string | null;
+  answers: Record<string, string>;
+  source?: string | null;
+  contentItemId?: string | null;
+}): Promise<QuizResult> {
+  const magnet = await prisma.leadMagnet.findFirst({ where: { slug: input.slug, status: "PUBLISHED", kind: "QUIZ" } });
+  if (!magnet) return { ok: false, error: "This quiz isn’t available." };
+
+  const config = asQuizConfig(magnet.config);
+  const { score, band, max } = scoreQuiz(config, input.answers ?? {});
+
+  const cap = await captureSubmission({
+    slug: input.slug,
+    email: input.email,
+    name: input.name,
+    company: input.company,
+    source: input.source,
+    contentItemId: input.contentItemId,
+    computedScore: score,
+    answers: { responses: input.answers, score, max, bandKey: band?.key ?? null },
+  });
+  if (!cap.ok) return { ok: false, error: cap.error };
+
+  return { ok: true, score, max, band, bookingSlug: config.bookingSlug ?? null };
+}
+
+export type AuditResult =
+  | { ok: false; error: string }
+  | { ok: true; qualified: boolean; bookingSlug: string | null; disqualifyMessage: string | null };
+
+/** Public audit-call application: score the qualifying answers, capture the
+ * lead, and — when it clears the threshold — return the booking handoff. */
+export async function captureAuditAction(input: {
+  slug: string;
+  email: string;
+  name?: string | null;
+  company?: string | null;
+  answers: Record<string, string>;
+  source?: string | null;
+  contentItemId?: string | null;
+}): Promise<AuditResult> {
+  const magnet = await prisma.leadMagnet.findFirst({ where: { slug: input.slug, status: "PUBLISHED", kind: "AUDIT_CALL" } });
+  if (!magnet) return { ok: false, error: "This application isn’t available." };
+
+  const config = asAuditConfig(magnet.config);
+  const score = scoreAudit(config, input.answers ?? {});
+  const qualified = qualifies(config, score);
+
+  const cap = await captureSubmission({
+    slug: input.slug,
+    email: input.email,
+    name: input.name,
+    company: input.company,
+    source: input.source,
+    contentItemId: input.contentItemId,
+    computedScore: score,
+    answers: { responses: input.answers, score, qualified },
+  });
+  if (!cap.ok) return { ok: false, error: cap.error };
+
+  return {
+    ok: true,
+    qualified,
+    bookingSlug: qualified ? config.bookingSlug ?? null : null,
+    disqualifyMessage: qualified ? null : config.disqualifyMessage ?? null,
+  };
+}
+
+export type CalcResult =
+  | { ok: false; error: string }
+  | { ok: true; output: number; outputLabel: string; outputUnit: string; band: QuizBand | null; bookingSlug: string | null };
+
+/** Public calculator submission: evaluate the formula, resolve the band, and
+ * capture the lead (base intent score; the computed value is stored, not scored). */
+export async function captureCalculatorAction(input: {
+  slug: string;
+  email: string;
+  name?: string | null;
+  company?: string | null;
+  values: Record<string, number>;
+  source?: string | null;
+  contentItemId?: string | null;
+}): Promise<CalcResult> {
+  const magnet = await prisma.leadMagnet.findFirst({ where: { slug: input.slug, status: "PUBLISHED", kind: "CALCULATOR" } });
+  if (!magnet) return { ok: false, error: "This calculator isn’t available." };
+
+  const config = asCalculatorConfig(magnet.config);
+  const { output, band } = computeCalculator(config, input.values ?? {});
+
+  const cap = await captureSubmission({
+    slug: input.slug,
+    email: input.email,
+    name: input.name,
+    company: input.company,
+    source: input.source,
+    contentItemId: input.contentItemId,
+    answers: { values: input.values, output, bandKey: band?.key ?? null },
+  });
+  if (!cap.ok) return { ok: false, error: cap.error };
+
+  return { ok: true, output, outputLabel: config.outputLabel, outputUnit: config.outputUnit, band, bookingSlug: config.bookingSlug ?? null };
+}
+
+export type SnapshotResponse =
+  | { ok: false; error: string }
+  | { ok: true; result: SnapshotResult; bookingSlug: string | null };
+
+/** Public financial-snapshot submission: compute the health metrics + valuation
+ * range from the entered figures, capture the lead, and return the snapshot. */
+export async function captureSnapshotAction(input: {
+  slug: string;
+  email: string;
+  name?: string | null;
+  company?: string | null;
+  inputs: SnapshotInputs;
+  source?: string | null;
+  contentItemId?: string | null;
+}): Promise<SnapshotResponse> {
+  const magnet = await prisma.leadMagnet.findFirst({ where: { slug: input.slug, status: "PUBLISHED", kind: "QBO_SNAPSHOT" } });
+  if (!magnet) return { ok: false, error: "This snapshot isn’t available." };
+
+  const config = asSnapshotConfig(magnet.config);
+  const result = computeSnapshot(config, input.inputs);
+
+  const cap = await captureSubmission({
+    slug: input.slug,
+    email: input.email,
+    name: input.name,
+    company: input.company,
+    source: input.source,
+    contentItemId: input.contentItemId,
+    answers: { inputs: input.inputs, score: result.score, band: result.bandLabel, adjEbitda: result.adjEbitda, valuationLow: result.valuationLow, valuationHigh: result.valuationHigh },
+  });
+  if (!cap.ok) return { ok: false, error: cap.error };
+
+  return { ok: true, result, bookingSlug: config.bookingSlug ?? null };
+}

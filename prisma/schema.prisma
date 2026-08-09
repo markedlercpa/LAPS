@@ -1,0 +1,1762 @@
+// LAPS — Sales Cycle Management
+// Prisma schema. Postgres in production (Neon).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Auth.js (NextAuth) models — Account holds the M365/Graph OAuth tokens
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  REP
+}
+
+model User {
+  id             String    @id @default(cuid())
+  name           String?
+  email          String    @unique
+  emailVerified  DateTime?
+  image          String?
+  role           Role      @default(REP)
+  hubspotOwnerId String?   @unique
+  createdAt      DateTime  @default(now())
+
+  accounts Account[]
+  sessions Session[]
+
+  // Ownership relations across the LAPS pipeline
+  leads        Lead[]        @relation("LeadOwner")
+  appointments Appointment[] @relation("AppointmentOwner")
+  proposals    Proposal[]    @relation("ProposalOwner")
+  prospects    Prospect[]    @relation("ProspectOwner")
+  activities   Activity[]
+  actionItems  ActionItem[]  @relation("ActionItemAssignee")
+  bookingHost  BookingHost?
+  mcpTokens    McpToken[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ---------------------------------------------------------------------------
+// LAPS pipeline
+// ---------------------------------------------------------------------------
+
+enum Stage {
+  NEW
+  APPOINTMENT
+  PROPOSAL
+  CLOSED_WON
+  CLOSED_LOST
+}
+
+model Lead {
+  id          String   @id @default(cuid())
+  hubspotId   String?  @unique
+  firstName   String
+  lastName    String
+  companyName String?
+  leadSource  String?
+  email       String?
+  phone       String?
+  stage       Stage    @default(NEW)
+  lostReason  String?
+  notes       String?  @db.Text
+  trustScore  Int      @default(0)
+  // Company sizing estimates (manual or imported), for qualification + filters.
+  revenueEstimate   Decimal? @db.Decimal(14, 2)
+  headcountEstimate Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ownerId String?
+  owner   User?   @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  activities   Activity[]
+  appointments Appointment[]
+  proposals    Proposal[]
+  actionItems  ActionItem[]
+  trustSignals TrustSignal[]
+  magnetSubmissions LeadMagnetSubmission[]
+
+  @@index([stage])
+  @@index([ownerId])
+}
+
+enum ActivityType {
+  EMAIL_SENT
+  EMAIL_RECEIVED
+  TEXT
+  CALL
+  NOTE
+  MEETING
+  OTHER
+}
+
+enum Direction {
+  IN
+  OUT
+}
+
+model Activity {
+  id         String       @id @default(cuid())
+  leadId     String
+  userId     String?
+  type       ActivityType
+  direction  Direction    @default(OUT)
+  subject    String?
+  body       String?      @db.Text
+  occurredAt DateTime     @default(now())
+  metadata   Json?
+
+  lead Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([leadId])
+  @@index([type])
+}
+
+enum AppointmentStatus {
+  BOOKED
+  COMPLETED
+  NO_SHOW
+  CANCELED
+}
+
+model Appointment {
+  id           String            @id @default(cuid())
+  leadId       String
+  ownerId      String?
+  title        String
+  scheduledAt  DateTime
+  durationMin  Int               @default(30)
+  status       AppointmentStatus @default(BOOKED)
+  graphEventId String?           @unique
+  notes        String?           @db.Text
+  createdAt    DateTime          @default(now())
+
+  // Self-serve booking fields (populated when booked via a public /book page).
+  eventTypeId     String?
+  eventType       BookingEventType? @relation(fields: [eventTypeId], references: [id], onDelete: SetNull)
+  inviteeName     String?
+  inviteeEmail    String?
+  inviteePhone    String?
+  timezone        String?
+  location        String?
+  meetingUrl      String?
+  answers         Json? // screening question answers
+  rescheduleToken String?           @unique
+  cancelToken     String?           @unique
+  reminderSentAt  DateTime?
+  bookedVia       String?
+
+  lead        Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  owner       User?        @relation("AppointmentOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  actionItems ActionItem[]
+
+  @@index([leadId])
+  @@index([scheduledAt])
+  @@index([eventTypeId])
+}
+
+enum ActionItemStatus {
+  OPEN
+  DONE
+}
+
+enum ActionItemSource {
+  MANUAL
+  FIREFLIES
+}
+
+/// GTD workflow bucket for the Triage to-do list.
+enum GtdBucket {
+  INBOX // unprocessed
+  NEXT // next actions (actionable now)
+  WAITING // waiting-for (delegated / blocked)
+  SCHEDULED // has a date / calendar item
+  SOMEDAY // someday-maybe
+}
+
+model ActionItem {
+  id            String           @id @default(cuid())
+  appointmentId String?
+  leadId        String?
+  assigneeId    String?
+  description   String
+  dueDate       DateTime?
+  status        ActionItemStatus @default(OPEN)
+  source        ActionItemSource @default(MANUAL)
+  // Triage to-do organization: Eisenhower matrix (important × urgent) + GTD.
+  important     Boolean          @default(false)
+  urgent        Boolean          @default(false)
+  gtd           GtdBucket        @default(INBOX)
+  context       String? // GTD context, e.g. "@calls", "@computer", "@errands"
+  notes         String?          @db.Text
+  createdAt     DateTime         @default(now())
+
+  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  lead        Lead?        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  assignee    User?        @relation("ActionItemAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  @@index([appointmentId])
+  @@index([status])
+  @@index([gtd])
+}
+
+enum ProposalStatus {
+  DRAFT
+  SENT
+  VIEWED
+  SIGNED
+  WON
+  LOST
+}
+
+enum PaymentScheduleType {
+  ONE_TIME
+  DEPOSIT_THEN_BALANCE
+  INSTALLMENTS
+  RECURRING
+}
+
+enum PaymentStatus {
+  NONE
+  PENDING
+  PAID
+}
+
+enum StaffLevel {
+  ASSOCIATE
+  SENIOR
+  MANAGER
+  DIRECTOR
+  PARTNER
+}
+
+// Firm-wide standard rate card (one row per level). Scoping cards default their
+// per-level cost/bill rates from here.
+model RateCardLevel {
+  level     StaffLevel @id
+  cost      Decimal    @db.Decimal(12, 2)
+  bill      Decimal    @db.Decimal(12, 2)
+  sortOrder Int        @default(0)
+}
+
+model Proposal {
+  id                    String         @id @default(cuid())
+  hubspotId             String?        @unique
+  contractId            String?        @unique // e.g. "EZ-2026-004", assigned when won
+  leadId                String
+  ownerId               String?
+  title                 String
+  status                ProposalStatus @default(DRAFT)
+  estimatedDeliveryCost Decimal        @default(0) @db.Decimal(12, 2)
+  createdAt             DateTime       @default(now())
+  sentAt                DateTime?
+  viewedAt              DateTime?
+  signedAt              DateTime?
+  wonAt                 DateTime?
+  lostAt                DateTime?
+  lostReason            String?
+
+  // Client-facing document content (shown on the public proposal page)
+  coverLetter    String? @db.Text
+  scopeNarrative String? @db.Text
+  termsText      String? @db.Text
+
+  // Public share + e-signature capability + audit trail
+  publicToken     String? @unique
+  signerName      String?
+  signerEmail     String?
+  signedIp        String?
+  signedUserAgent String?
+
+  // Payment schedule (stored + displayed now; collection wired in a later phase)
+  paymentScheduleType PaymentScheduleType @default(ONE_TIME)
+  recurringInterval   String?
+
+  // Stripe deposit collection at signing
+  paymentStatus         PaymentStatus @default(NONE)
+  amountPaid            Decimal?      @db.Decimal(12, 2)
+  paidAt                DateTime?
+  stripeSessionId       String?       @unique
+  stripePaymentIntentId String?
+
+  // Scoping engine: sales-value markup on top of standard budget revenue
+  salesMarkupEnabled Boolean @default(false)
+  salesMarkupPct     Decimal @default(0) @db.Decimal(6, 2)
+
+  // Demo deliverables shown to the client (gate: at least one required to send)
+  demoKeys String[] @default([])
+
+  lead         Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  owner        User?              @relation("ProposalOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  lineItems    ProposalLineItem[]
+  payments     ProposalPayment[]
+  scopingLines ScopingLine[]
+  handoff      Handoff?
+
+  @@index([leadId])
+  @@index([status])
+}
+
+// Per-proposal scoping: estimated hours per staff level with the cost/bill rates
+// (snapshot-defaulted from the firm rate card, overridable per deal).
+model ScopingLine {
+  id         String     @id @default(cuid())
+  proposalId String
+  level      StaffLevel
+  hours      Decimal    @default(0) @db.Decimal(10, 2)
+  costRate   Decimal    @default(0) @db.Decimal(12, 2)
+  billRate   Decimal    @default(0) @db.Decimal(12, 2)
+  sortOrder  Int        @default(0)
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@unique([proposalId, level])
+  @@index([proposalId])
+}
+
+model ProposalPayment {
+  id          String  @id @default(cuid())
+  proposalId  String
+  description String
+  amount      Decimal @default(0) @db.Decimal(12, 2)
+  dueOn       String?
+  sortOrder   Int     @default(0)
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@index([proposalId])
+}
+
+// Reusable proposal templates (agent- and human-selectable). A full template
+// prefills every proposal section + line items + payment schedule in one apply.
+model ProposalTemplate {
+  id                  String              @id @default(cuid())
+  key                 String              @unique
+  name                String
+  description         String?
+  defaultTitle        String
+  coverLetter         String?             @db.Text
+  scopeNarrative      String?             @db.Text
+  termsText           String?             @db.Text
+  paymentScheduleType PaymentScheduleType @default(ONE_TIME)
+  recurringInterval   String?
+  defaultDeliveryCost Decimal?            @db.Decimal(12, 2)
+  demoKey             String?
+  lineItems           Json // [{ description, quantity, unitPrice }]
+  payments            Json // [{ description, amount, dueOn }]
+  sortOrder           Int                 @default(0)
+  createdAt           DateTime            @default(now())
+}
+
+enum SnippetType {
+  COVER
+  SCOPE
+  TERMS
+}
+
+// Per-section reusable snippets that fill a single proposal section.
+model SectionSnippet {
+  id        String      @id @default(cuid())
+  key       String      @unique
+  type      SnippetType
+  name      String
+  body      String      @db.Text
+  sortOrder Int         @default(0)
+
+  @@index([type])
+}
+
+// Firm-level demo library: anonymized SAMPLE deliverables per service line,
+// shown to the client so no proposal goes out without an artifact of the work.
+model DemoTemplate {
+  id            String  @id @default(cuid())
+  key           String  @unique
+  serviceLine   String
+  name          String
+  title         String
+  subtitle      String?
+  metrics       Json // [{ label, value, hint }]
+  tables        Json // [{ title, columns:[...], rows:[[...]] }]
+  narrative     String? @db.Text
+  isPlaceholder Boolean @default(true)
+  sortOrder     Int     @default(0)
+}
+
+// Firm-level brochure / social proof shown on the client proposal page. Single
+// row (id "default"). Content is JSON so agents/humans can edit freely.
+// isPlaceholder stays true until real content is set — the client page shows a
+// "sample content" banner while true so example stats never look real.
+model Brochure {
+  id            String   @id @default("default")
+  headline      String?
+  intro         String?  @db.Text
+  stats         Json // [{ value, label }]
+  caseStudies   Json // [{ service, title, result, detail }]
+  testimonials  Json // [{ quote, author, role }]
+  linkedinPosts Json // [{ excerpt, url }]
+  isPlaceholder Boolean  @default(true)
+  updatedAt     DateTime @updatedAt
+}
+
+model ProposalLineItem {
+  id          String  @id @default(cuid())
+  proposalId  String
+  description String
+  quantity    Decimal @default(1) @db.Decimal(12, 2)
+  unitPrice   Decimal @default(0) @db.Decimal(12, 2)
+  sortOrder   Int     @default(0)
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@index([proposalId])
+}
+
+enum DeliveryStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETE
+}
+
+model Handoff {
+  id             String         @id @default(cuid())
+  proposalId     String         @unique
+  deliveryStatus DeliveryStatus @default(PENDING)
+  assignedTo     String?
+  createdAt      DateTime       @default(now())
+
+  proposal  Proposal        @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+  checklist ChecklistItem[]
+}
+
+model ChecklistItem {
+  id          String    @id @default(cuid())
+  handoffId   String
+  label       String
+  done        Boolean   @default(false)
+  dueDate     DateTime?
+  completedAt DateTime?
+  sortOrder   Int       @default(0)
+
+  handoff Handoff @relation(fields: [handoffId], references: [id], onDelete: Cascade)
+
+  @@index([handoffId])
+}
+
+enum ProspectStatus {
+  COLD
+  QUEUED
+  IN_SEQUENCE
+  ENGAGED
+  PROMOTED
+  DISQUALIFIED
+}
+
+/// Account-based-marketing prospect list (Dream 100). Cold accounts imported
+/// manually, worked through the warming sequence, and promoted into Leads when
+/// they engage. Kept separate from Lead so the pipeline stays clean.
+model Prospect {
+  id                String         @id @default(cuid())
+  companyName       String
+  contactName       String?
+  title             String?
+  email             String?
+  phone             String?
+  website           String?
+  industry          String?
+  revenueEstimate   Decimal?       @db.Decimal(14, 2)
+  headcountEstimate Int?
+  tier              String         @default("B") // Dream 100 tier: A | B | C
+  status            ProspectStatus @default(COLD)
+  source            String? // list / import batch name
+  notes             String?        @db.Text
+  ownerId           String?
+  promotedLeadId    String?        @unique
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  owner User? @relation("ProspectOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([tier])
+}
+
+/// Per-period sales targets shown against actuals on the reporting page.
+/// One row per (granularity, period start); null metric = no target set.
+model SalesTarget {
+  id            String   @id @default(cuid())
+  granularity   String // week | month | quarter
+  periodStart   DateTime @db.Date
+  leads         Int?
+  apptsBooked   Int?
+  proposalsSent Int?
+  dealsWon      Int?
+  wonValue      Decimal? @db.Decimal(14, 2)
+  updatedAt     DateTime @updatedAt
+
+  @@unique([granularity, periodStart])
+}
+
+// ============================================================================
+// ECHO — trust & authority content engine (Phase 1: Evidence + Calling Cards)
+// Evidence -> Calling Cards -> (Housed Content -> Optics) -> LAPS handoff.
+// ============================================================================
+
+// Shared taxonomy across ECHO + LAPS + Quality of Exit — the eight QoO pillars.
+enum QoOPillar {
+  EARNINGS
+  CASH_FLOW
+  REPORTING
+  GROWTH
+  TAXATION
+  CAPITAL
+  LIFESTYLE
+  VALUATION
+}
+
+enum EvidenceType {
+  PAIN_POINT
+  OBJECTION
+  MYTH
+  PRIZE_STATE
+  CLIENT_STORY
+  METHODOLOGY
+  QUOTE
+  DATA_POINT
+}
+
+enum EvidenceSource {
+  SALES_CALL
+  CLIENT_ENGAGEMENT
+  FIREFLIES_TRANSCRIPT
+  EMAIL
+  MANUAL
+}
+
+enum Consent {
+  INTERNAL_ONLY
+  ANONYMIZED
+  PUBLIC
+}
+
+enum CardCategory {
+  HOOK
+  REFRAME
+  MANTRA
+  OBJECTION_KILL
+  PRIZE_FRAME
+  MECHANISM_NAME
+}
+
+enum CardStatus {
+  CANDIDATE
+  ACTIVE
+  RETIRED
+}
+
+// E — Evidence: the vault. Real, resonant material from calls/engagements.
+model EvidenceRecord {
+  id         String         @id @default(cuid())
+  type       EvidenceType
+  source     EvidenceSource @default(MANUAL)
+  sourceRef  String?
+  rawText    String         @db.Text
+  distilled  String?        @db.Text
+  clientRef  String? // internal only — never published
+  consent    Consent        @default(INTERNAL_ONLY)
+  pillarTags QoOPillar[]
+  icpFit     Boolean        @default(false)
+  icpNotes   String?
+  strength   Int            @default(3) // 1-5, how vivid/provable
+  usedCount  Int            @default(0)
+  lastUsedAt DateTime?
+  createdAt  DateTime       @default(now())
+
+  cards        CallingCard[] @relation("CardEvidence")
+  contentItems ContentItem[] @relation("ContentEvidence")
+
+  @@index([type])
+  @@index([source])
+}
+
+// Named frameworks (QoO pillars, Quality of Exit, deal cases) — versioned markdown.
+model MethodologyDoc {
+  id         String      @id @default(cuid())
+  slug       String      @unique
+  name       String
+  version    Int         @default(1)
+  body       String      @db.Text
+  pillarTags QoOPillar[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+}
+
+// C — Calling Cards: the repeatable, ownable language bank.
+model CallingCard {
+  id               String       @id @default(cuid())
+  cardText         String       @db.Text
+  category         CardCategory
+  pillarTags       QoOPillar[]
+  status           CardStatus   @default(CANDIDATE)
+  usageCount       Int          @default(0)
+  performanceIndex Float        @default(0)
+  createdAt        DateTime     @default(now())
+
+  evidence     EvidenceRecord[] @relation("CardEvidence")
+  contentItems ContentItem[]    @relation("ContentCards")
+
+  @@index([status])
+}
+
+// ── H — Housed Content: the content builder + repurposing engine ──────────
+enum ContentChannel {
+  LINKEDIN
+  X
+  EMAIL
+  NEWSLETTER
+  BLOG
+  YOUTUBE
+  PODCAST
+  WEBSITE
+  BOOK
+  OTHER
+}
+
+enum ContentStatus {
+  DRAFT
+  REVIEW
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ModuleKind {
+  BOOK
+  CAMPAIGN
+  SERIES
+  COURSE
+  OTHER
+}
+
+// A grouping of content items — a book (chapters), a campaign, a series.
+model ContentModule {
+  id          String     @id @default(cuid())
+  name        String
+  kind        ModuleKind @default(CAMPAIGN)
+  description String?    @db.Text
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  items ContentItem[]
+}
+
+// A single piece of content. Every item should trace back to evidence.
+model ContentItem {
+  id         String         @id @default(cuid())
+  title      String
+  channel    ContentChannel @default(LINKEDIN)
+  status     ContentStatus  @default(DRAFT)
+  format     String?
+  summary    String?        @db.Text
+  body       String         @default("") @db.Text
+  pillarTags QoOPillar[]
+
+  moduleId  String?
+  module    ContentModule? @relation(fields: [moduleId], references: [id], onDelete: SetNull)
+  sortOrder Int            @default(0)
+
+  // Repurposing: this item was derived from a source item.
+  sourceItemId String?
+  sourceItem   ContentItem?  @relation("Repurpose", fields: [sourceItemId], references: [id], onDelete: SetNull)
+  derivatives  ContentItem[] @relation("Repurpose")
+
+  evidence EvidenceRecord[] @relation("ContentEvidence")
+  cards    CallingCard[]    @relation("ContentCards")
+  metrics  MetricSnapshot[]
+
+  // The lead magnet this content CTAs to (Content → Lead Magnet bridge).
+  ctaMagnetId String?
+  ctaMagnet   LeadMagnet?              @relation("ContentCtaMagnet", fields: [ctaMagnetId], references: [id], onDelete: SetNull)
+  magnetHits  LeadMagnetSubmission[]   @relation("SubmissionSourceContent")
+
+  publishedUrl String?
+  publishedAt  DateTime?
+  scheduledFor DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([status])
+  @@index([channel])
+  @@index([moduleId])
+  @@index([ctaMagnetId])
+}
+
+// ── O — Optics: how content performed once published ──────────────────────
+// Manually aggregated for now (no analytics connector). Each snapshot is a
+// point-in-time reading of a piece's numbers; resonance is derived.
+model MetricSnapshot {
+  id            String          @id @default(cuid())
+  contentItemId String?
+  contentItem   ContentItem?    @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  channel       ContentChannel?
+  capturedAt    DateTime        @default(now())
+  impressions   Int             @default(0)
+  engagements   Int             @default(0)
+  clicks        Int             @default(0)
+  conversions   Int             @default(0)
+  note          String?
+  source        String?
+  createdAt     DateTime        @default(now())
+
+  @@index([contentItemId])
+  @@index([capturedAt])
+}
+
+// Hard guardrail: phrases that fail draft/card validation on sight.
+model BannedPhrase {
+  id        String   @id @default(cuid())
+  phrase    String   @unique
+  reason    String?
+  createdAt DateTime @default(now())
+}
+
+// ── ECHO → LAPS handoff: per-lead trust score ─────────────────────────────
+// Trust is earned in ECHO (content engagement) and converted in LAPS. Each
+// signal is a weighted engagement event; Lead.trustScore caches the rollup so
+// the pipeline and lead lists stay cheap to render.
+enum TrustSignalKind {
+  CONTENT_VIEW
+  CONTENT_ENGAGE
+  EMAIL_REPLY
+  MEETING_ATTENDED
+  WEBINAR
+  DOWNLOAD
+  REFERRAL
+  INBOUND_INQUIRY
+  MANUAL
+}
+
+model TrustSignal {
+  id         String          @id @default(cuid())
+  leadId     String
+  lead       Lead            @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  kind       TrustSignalKind
+  weight     Int
+  note       String?
+  contentRef String?
+  source     String?
+  occurredAt DateTime        @default(now())
+  createdAt  DateTime        @default(now())
+
+  @@index([leadId])
+}
+
+// ── Scheduling — self-serve booking (Calendly-style) ──────────────────────
+enum BookingLocationType {
+  ZOOM
+  PHONE
+  IN_PERSON
+  CUSTOM
+}
+
+// One per host user: their public booking identity + default availability.
+model BookingHost {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slug        String   @unique
+  displayName String?
+  welcome     String?  @db.Text
+  timezone    String   @default("America/New_York")
+  zoomLink    String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  eventTypes BookingEventType[]
+  rules      AvailabilityRule[]
+  overrides  AvailabilityOverride[]
+}
+
+// Weekly recurring availability window (minutes-from-midnight, host timezone).
+model AvailabilityRule {
+  id       String      @id @default(cuid())
+  hostId   String
+  host     BookingHost @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  weekday  Int // 0=Sunday .. 6=Saturday
+  startMin Int
+  endMin   Int
+
+  @@index([hostId])
+}
+
+// Per-date exception: blackout (available=false) or custom hours (available=true).
+model AvailabilityOverride {
+  id        String      @id @default(cuid())
+  hostId    String
+  host      BookingHost @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  date      DateTime    @db.Date
+  available Boolean     @default(false)
+  startMin  Int?
+  endMin    Int?
+
+  @@unique([hostId, date])
+}
+
+// A bookable meeting type (duration, location, rules, screening questions).
+model BookingEventType {
+  id                 String              @id @default(cuid())
+  hostId             String
+  host               BookingHost         @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  slug               String
+  name               String
+  description        String?             @db.Text
+  durationMin        Int                 @default(30)
+  locationType       BookingLocationType @default(ZOOM)
+  location           String? // overrides host zoomLink when set
+  bufferBeforeMin    Int                 @default(0)
+  bufferAfterMin     Int                 @default(0)
+  minNoticeMin       Int                 @default(240)
+  rollingDays        Int                 @default(60)
+  windowBusinessDays Int? // when set, cap the window to N business days (overrides rollingDays)
+  maxPerDay          Int?
+  color              String?
+  active             Boolean             @default(true)
+  questions          Json                @default("[]") // [{id,label,type,required}]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  appointments Appointment[]
+
+  @@unique([hostId, slug])
+  @@index([hostId])
+}
+
+/// A bearer token that lets an external Claude MCP connector act as one LAPS
+/// user. Only the SHA-256 hash of the token is stored; the raw value is shown
+/// once at creation. Revoke by setting revokedAt.
+model McpToken {
+  id         String    @id @default(cuid())
+  name       String
+  tokenHash  String    @unique
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+
+  @@index([userId])
+}
+
+// ===========================================================================
+// STAPLE — delivery / production module (system of record for delivery)
+// Phase 1: native spine + Staging. Cross-module links (User/Lead/Proposal/
+// Handoff) are scalar id fields, not Prisma relations, so this block is purely
+// additive and self-contained. Relations exist only within STAPLE.
+// ===========================================================================
+
+enum StapleStage {
+  STAGING
+  TAKEOFF
+  ASSEMBLE
+  PACKAGE
+  DELIVERED
+  LEVERAGE
+  EVANGELIZE
+  CLOSED
+}
+
+enum InfoStatus {
+  RECEIVED
+  REQUESTED
+  PROMISED
+  NOT_APPLICABLE
+}
+
+enum InfoSource {
+  SALES_HANDOFF
+  CLIENT_UPLOAD
+  EMAIL
+  KICKOFF
+  PRIOR_ENGAGEMENT
+  MANUAL
+}
+
+enum OwnerSide {
+  US
+  CLIENT
+  THIRD_PARTY
+}
+
+/// A client as delivered-to. Canonical for the delivery domain; may reference
+/// an originating LAPS Lead but never depends on one.
+model StapleClient {
+  id           String   @id @default(cuid())
+  legalName    String
+  dba          String?
+  industry     String?
+  tier         String?
+  ownerId      String? // User id (relationship owner) — scalar link
+  leadId       String?  @unique // originating LAPS Lead — scalar link
+  externalRefs Json? // { hubspotCompanyId?, karbonClientId? }
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  contacts    Contact[]
+  engagements Engagement[]
+  infoItems   InfoItem[]
+
+  @@index([ownerId])
+}
+
+model Contact {
+  id        String   @id @default(cuid())
+  clientId  String
+  name      String
+  email     String?
+  phone     String?
+  role      String? // owner | controller | broker | attorney | lender | other
+  commPrefs Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client StapleClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+}
+
+/// The engagement spine. Runs through the six STAPLE stages.
+model Engagement {
+  id             String      @id @default(cuid())
+  clientId       String
+  serviceLine    String // see lib/staple-taxonomy SERVICE_LINES
+  stage          StapleStage @default(STAGING)
+  ownerId        String? // User id — scalar link
+  preparerId     String? // User id — scalar link
+  reviewerId     String? // User id — scalar link
+  pod            String?
+  proposalId     String?     @unique // originating LAPS Proposal — scalar link
+  handoffId      String?     @unique // originating LAPS Handoff — scalar link
+  leadId         String? // originating LAPS Lead — scalar link
+  accepted       Boolean     @default(false) // delivery-lead accepted the staging handoff
+  acceptedById   String?
+  acceptedAt     DateTime?
+  dealMeta       Json? // { evRange?, dealType?, counterparties?, lender? }
+  handoffSummary Json? // { sold, promised, know, have } structured staging summary
+  targetDates    Json? // { kickoff?, fieldwork?, draft?, delivery? }
+  statusFlags    Json? // { blocked?, atRisk?, overdueInReview? }
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  client      StapleClient      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  terms       EngagementTerms[]
+  infoItems   InfoItem[]
+  files       FileAsset[]
+  transitions StageTransition[]
+
+  @@index([clientId])
+  @@index([stage])
+  @@index([ownerId])
+}
+
+/// Versioned engagement terms — owned by STAPLE, seeded v1 from the won proposal.
+model EngagementTerms {
+  id               String    @id @default(cuid())
+  engagementId     String
+  version          Int
+  title            String?
+  services         Json      @default("[]") // [{ name, deliverable }]
+  fee              Decimal?  @db.Decimal(12, 2)
+  feeType          String?
+  paymentSchedule  Json? // [{ label, amount, dueOn }]
+  timeline         Json? // { commitments }
+  scopeNarrative   String?   @db.Text
+  scopeInclusions  Json      @default("[]")
+  scopeExclusions  Json      @default("[]")
+  mutuallyAgreed   Boolean   @default(false)
+  confirmedAt      DateTime?
+  sourceProposalId String?
+  createdAt        DateTime  @default(now())
+
+  engagement Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  @@unique([engagementId, version])
+  @@index([engagementId])
+}
+
+/// Information Registry item — the "never ask twice" ledger. Client-scoped,
+/// engagement-linked.
+model InfoItem {
+  id           String     @id @default(cuid())
+  clientId     String
+  engagementId String?
+  canonicalKey String?
+  label        String
+  status       InfoStatus @default(REQUESTED)
+  source       InfoSource @default(MANUAL)
+  ownerSide    OwnerSide  @default(CLIENT)
+  fileAssetId  String? // scalar link (avoids circular relation with FileAsset)
+  receivedAt   DateTime?
+  requestedAt  DateTime?
+  notes        String?    @db.Text
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  client     StapleClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  engagement Engagement?  @relation(fields: [engagementId], references: [id], onDelete: SetNull)
+
+  @@index([clientId])
+  @@index([engagementId])
+  @@index([status])
+}
+
+/// Every document received or produced. Bytes live in object storage
+/// (storageKey); null storageKey = metadata-only until S3 is wired.
+model FileAsset {
+  id           String   @id @default(cuid())
+  engagementId String?
+  clientId     String? // scalar link
+  infoItemId   String? // scalar link
+  name         String
+  kind         String?
+  storageKey   String?
+  contentHash  String?
+  sizeBytes    Int?
+  version      Int      @default(1)
+  supersedesId String? // scalar link (prior version)
+  uploadedById String? // User id — scalar link
+  source       String   @default("native") // native | adapter
+  createdAt    DateTime @default(now())
+
+  engagement Engagement? @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  @@index([engagementId])
+  @@index([clientId])
+}
+
+/// Stage-change audit trail — drives cycle-time metrics and gate history.
+model StageTransition {
+  id           String       @id @default(cuid())
+  engagementId String
+  fromStage    StapleStage?
+  toStage      StapleStage
+  byUserId     String?
+  note         String?
+  at           DateTime     @default(now())
+
+  engagement Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  @@index([engagementId])
+}
+
+// ===========================================================================
+// PACE — finance module (analytics layer on top of the QBO ledger)
+// Phase 1: Actuals. Native financial store (entities, normalized TB, reporting
+// COA + mapping, statements), fed by QBO (flag-gated) or manual/CSV import.
+// Cross-module/user links are scalar ids. QBO stays the accounting system of
+// record; PACE never writes to the ledger.
+// ===========================================================================
+
+enum LedgerProvider {
+  QBO
+  ZOHO
+  MANUAL
+}
+
+enum StatementKind {
+  IS
+  BS
+}
+
+enum NaturalSide {
+  DEBIT
+  CREDIT
+}
+
+enum PeriodStatus {
+  OPEN
+  CLOSED
+}
+
+enum SyncStatus {
+  OK
+  PARTIAL
+  FAILED
+}
+
+/// A company PACE tracks. Multi-entity from day one; consolidated views sum
+/// across entities.
+model Entity {
+  id        String   @id @default(cuid())
+  name      String
+  legalName String?
+  kind      String   @default("operating") // operating | holdco | opm | other
+  currency  String   @default("USD")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  connection     LedgerConnection?
+  ledgerAccounts LedgerAccount[]
+  periods        TrialBalancePeriod[]
+  syncRuns       SyncRun[]
+  budgets        Budget[]
+  varianceNotes  VarianceNote[]
+  glLines        GeneralLedgerLine[]
+
+  @@index([active])
+}
+
+/// The ledger link for an entity. Holds QBO OAuth tokens (mirrors Auth.js
+/// Account); MANUAL provider needs none.
+model LedgerConnection {
+  id             String         @id @default(cuid())
+  entityId       String         @unique
+  provider       LedgerProvider @default(MANUAL)
+  status         String         @default("disconnected")
+  realmId        String? // QBO company id
+  accessToken    String?        @db.Text
+  refreshToken   String?        @db.Text
+  expiresAt      DateTime?
+  lastSyncAt     DateTime?
+  lastSyncStatus String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+}
+
+/// A source account from an entity's ledger, carrying QuickBooks' descriptive
+/// metadata (AccountType/SubType/Classification + parent hierarchy) so PACE can
+/// rebuild the statements the way QBO organizes them — no manual COA mapping.
+model LedgerAccount {
+  id               String   @id @default(cuid())
+  entityId         String
+  externalId       String? // QBO account id
+  acctNum          String? // QBO account number (AcctNum), for display + sort
+  name             String
+  sourceType       String? // QBO AccountType (e.g. Bank, Income, Expense)
+  accountSubType   String? // QBO AccountSubType (e.g. Checking, ServiceFeeIncome)
+  classification   String? // QBO Classification (Asset/Liability/Equity/Revenue/Expense)
+  fqName           String? // QBO FullyQualifiedName ("Parent:Child") — hierarchy
+  parentExternalId String? // QBO ParentRef id, when a sub-account
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+
+  entity      Entity              @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  lines       TrialBalanceLine[]
+  glLines     GeneralLedgerLine[]
+  budgetLines BudgetLine[]
+
+  @@unique([entityId, externalId])
+  @@index([entityId])
+}
+
+/// One entity's trial balance for one month.
+model TrialBalancePeriod {
+  id          String       @id @default(cuid())
+  entityId    String
+  periodMonth DateTime     @db.Date // first of month
+  status      PeriodStatus @default(OPEN)
+  source      String       @default("manual") // qbo | manual
+  balanced    Boolean      @default(false)
+  sourcedAt   DateTime     @default(now())
+  notes       String?
+
+  entity Entity             @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  lines  TrialBalanceLine[]
+
+  @@unique([entityId, periodMonth])
+  @@index([entityId])
+}
+
+/// A single account's balance within a trial-balance period (signed, natural-
+/// side normalized: debits positive, credits negative on the raw amount).
+model TrialBalanceLine {
+  id              String  @id @default(cuid())
+  periodId        String
+  ledgerAccountId String
+  amount          Decimal @db.Decimal(14, 2)
+
+  period        TrialBalancePeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  ledgerAccount LedgerAccount      @relation(fields: [ledgerAccountId], references: [id], onDelete: Cascade)
+
+  @@index([periodId])
+  @@index([ledgerAccountId])
+}
+
+/// Transaction-level general ledger, pulled from QBO's GeneralLedger report.
+/// Feeds drill-down (a statement/TB line → the transactions behind it) and
+/// bottoms-up forecasting. Each row is one posting to one account. Amounts are
+/// signed (debit +, credit -) to match the TB convention. Idempotent per month:
+/// a re-sync deletes the entity's lines for that month and re-inserts.
+model GeneralLedgerLine {
+  id              String   @id @default(cuid())
+  entityId        String
+  ledgerAccountId String? // source account (→ reporting COA via its mapping); null if unresolved
+  periodMonth     DateTime @db.Date // first of the txn's month, for fast range filters
+  txnDate         DateTime @db.Date
+  txnType         String? // Invoice | Bill | JournalEntry | Deposit | ...
+  docNumber       String?
+  name            String? // customer / vendor / payee
+  memo            String?  @db.Text
+  splitAccount    String? // the "split" (other side) account label from QBO
+  amount          Decimal  @db.Decimal(14, 2) // QBO natural-side amount (credit-balance accounts read positive)
+  externalTxnId   String? // QBO transaction id, when the report exposes it
+  source          String   @default("qbo")
+  createdAt       DateTime @default(now())
+
+  entity        Entity         @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  ledgerAccount LedgerAccount? @relation(fields: [ledgerAccountId], references: [id], onDelete: SetNull)
+
+  @@index([entityId, periodMonth])
+  @@index([ledgerAccountId])
+  @@index([entityId, txnDate])
+}
+
+/// Audit trail for every sync/import + its data-quality results.
+model SyncRun {
+  id         String     @id @default(cuid())
+  entityId   String
+  startedAt  DateTime   @default(now())
+  finishedAt DateTime?
+  status     SyncStatus @default(OK)
+  message    String?
+  stats      Json? // { accounts, periods, unmapped, balanced }
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@index([entityId])
+}
+
+// ===========================================================================
+// PACE Phase 2 — Expectations (budgets, budget-vs-actual, variance narratives)
+// Budgets are entered at the firm-standard reporting-COA line so they tie to
+// the statements from Phase 1 with zero mapping. Versioned + lockable.
+// ===========================================================================
+
+enum BudgetKind {
+  ORIGINAL
+  REFORECAST
+  SCENARIO
+}
+
+enum BudgetStatus {
+  DRAFT
+  LOCKED
+}
+
+model Budget {
+  id         String       @id @default(cuid())
+  entityId   String
+  fiscalYear Int
+  label      String // e.g. "FY2026 Original", "Q2 Reforecast", "Downside"
+  kind       BudgetKind   @default(ORIGINAL)
+  status     BudgetStatus @default(DRAFT)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  entity Entity       @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  lines  BudgetLine[]
+
+  @@unique([entityId, fiscalYear, label])
+  @@index([entityId])
+}
+
+/// One budget line per QuickBooks (ledger) account, holding twelve monthly
+/// amounts keyed by "YYYY-MM" in `monthly` (natural-side positive, like the
+/// statements). Budgets plan natively at the QBO account level — no translation
+/// — so budget-vs-actual compares account-to-account.
+model BudgetLine {
+  id              String @id @default(cuid())
+  budgetId        String
+  ledgerAccountId String
+  monthly         Json   @default("{}") // { "2026-01": 12000, ... }
+
+  budget        Budget        @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  ledgerAccount LedgerAccount @relation(fields: [ledgerAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([budgetId, ledgerAccountId])
+  @@index([budgetId])
+  @@index([ledgerAccountId])
+}
+
+/// A one-line explanation attached to a flagged variance (entity + statement
+/// section + month). Budget-vs-actual is now section-level (Revenue, COGS,
+/// OpEx, …), so notes key on that section string. May be AI-drafted then
+/// human-approved. The monthly operating review is assembled from these.
+model VarianceNote {
+  id          String   @id @default(cuid())
+  entityId    String
+  accountKey  String // statement section / reporting `type` (e.g. "Revenue", "OpEx")
+  periodMonth DateTime @db.Date
+  text        String   @db.Text
+  aiDrafted   Boolean  @default(false)
+  authorId    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@unique([entityId, accountKey, periodMonth])
+  @@index([entityId, periodMonth])
+}
+
+// ===========================================================================
+// WORK — Capacity & Portfolio Economics ("Capacity" module, HOTEL spec)
+// Phase 1: the ledger — role bands (effective-dated rates), pool resources,
+// portfolios, portfolio engagements + per-band hour budgets, and Karbon
+// actuals synced into consumed-only booking rows. Booking lifecycle,
+// week-close, and P&L settlement are Phases 2-3.
+// ===========================================================================
+
+enum CapacityBookingStatus {
+  REQUESTED
+  CONFIRMED
+  RELEASED
+  CONSUMED_CLOSED
+  DECLINED
+}
+
+/// A pricing tier (Associate / Senior Associate / Manager / Tax Review).
+/// Bookings charge at the band rate, not per-person, to prevent arbitrage.
+/// Rates are effective-dated in RoleBandRate (never mutate history).
+model RoleBand {
+  id                 String   @id @default(cuid())
+  name               String   @unique
+  targetUtilization  Decimal  @default(0.80) @db.Decimal(4, 3) // for loaded-rate derivation
+  sortOrder          Int      @default(0)
+  active             Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  rates       RoleBandRate[]
+  resources   PoolResource[]
+  budgets     EngagementRoleBudget[]
+  bookings    CapacityBooking[]
+}
+
+/// Effective-dated loaded/bill rates for a role band. P&L math always uses the
+/// row whose effectiveFrom is the latest on or before the booking's week start.
+model RoleBandRate {
+  id             String   @id @default(cuid())
+  roleBandId     String
+  fiscalYear     Int? // the fiscal year this standard cost applies to
+  loadedRateCents Int
+  billRateCents  Int? // optional standard billing rate for realized-rate analysis
+  effectiveFrom  DateTime @db.Date
+  note           String?  @db.Text // derivation inputs, for auditability
+  createdAt      DateTime @default(now())
+
+  roleBand RoleBand @relation(fields: [roleBandId], references: [id], onDelete: Cascade)
+
+  @@unique([roleBandId, effectiveFrom])
+  @@index([roleBandId])
+}
+
+/// A pool member (delivery staff below director level).
+model PoolResource {
+  id                  String   @id @default(cuid())
+  personName          String
+  email               String   @unique
+  roleBandId          String
+  weeklyCapacityHours Decimal  @default(40) @db.Decimal(5, 2)
+  skillTags           String[]
+  location            String?
+  costExempt          Boolean  @default(false) // directors: hours count, but cost $0 (base carried on the portfolio)
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  createdBy           String?
+
+  roleBand    RoleBand          @relation(fields: [roleBandId], references: [id])
+  bookings    CapacityBooking[]
+  timeEntries TimeEntry[]
+
+  @@index([roleBandId])
+}
+
+/// A Portfolio Director's book of clients/engagements — the P&L unit.
+model Portfolio {
+  id                          String   @id @default(cuid())
+  name                        String
+  fiscalYear                  Int? // tag the book to a fiscal year (multi-year support + filters)
+  directorName                String
+  directorEmail               String
+  directorCostCentsAnnual     Int      @default(0)
+  declaredPortfolioRevenueCents Int    @default(0)
+  gpTargetPct                 Decimal  @default(0.50) @db.Decimal(5, 4)
+  parBonusPct                 Decimal  @default(0.05) @db.Decimal(5, 4) // par bonus as a share of declared revenue
+  bonusCliffBandPct           Decimal  @default(0.20) @db.Decimal(5, 4)
+  directorBillableFloorPct    Decimal  @default(0.45) @db.Decimal(5, 4)
+  active                      Boolean  @default(true)
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+  createdBy                   String?
+
+  engagements PortfolioEngagement[]
+  bookings    CapacityBooking[]
+  adjustments PnlAdjustment[]
+
+  @@index([active])
+}
+
+/// Manual P&L journal for a portfolio (write-offs, cross-portfolio corrections).
+model PnlAdjustment {
+  id          String    @id @default(cuid())
+  portfolioId String
+  periodMonth DateTime? @db.Date // optional month tag; null = general
+  amountCents Int // signed: positive adds to GP, negative reduces it
+  memo        String
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@index([portfolioId])
+}
+
+/// A client work item (mirrors a Karbon work item). Belongs to one Portfolio,
+/// carries an hours budget by role band.
+model PortfolioEngagement {
+  id                  String   @id @default(cuid())
+  portfolioId         String
+  clientName          String
+  engagementType      String   @default("other") // qoe | cas_monthly | tax | advisory | other
+  revenueCents        Int      @default(0)
+  revenueRecognition  String   @default("pct_hours") // pct_hours | fixed_on_completion | monthly
+  startWeek           String? // ISO week e.g. 2026-W33
+  endWeek             String?
+  status              String   @default("planned") // planned | active | on_hold | complete
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  createdBy           String?
+
+  portfolio   Portfolio              @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  budgets     EngagementRoleBudget[]
+  bookings    CapacityBooking[]
+  timeEntries TimeEntry[]
+
+  @@index([portfolioId])
+}
+
+/// Budgeted hours for one engagement × role band.
+model EngagementRoleBudget {
+  id            String  @id @default(cuid())
+  engagementId  String
+  roleBandId    String
+  budgetedHours Decimal @default(0) @db.Decimal(7, 2)
+
+  engagement PortfolioEngagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  roleBand   RoleBand            @relation(fields: [roleBandId], references: [id])
+
+  @@unique([engagementId, roleBandId])
+  @@index([engagementId])
+}
+
+/// A reservation of N hours of a resource in an ISO week against an engagement —
+/// the atomic unit of the hoteling system. In Phase 1, Karbon writes
+/// consumed-only rows (hoursBooked = 0, unbookedConsumption = true).
+model CapacityBooking {
+  id                String                @id @default(cuid())
+  engagementId      String
+  portfolioId       String // denormalized from engagement for fast P&L queries
+  resourceId        String
+  roleBandId        String // snapshotted at confirm time
+  isoWeek           String // e.g. 2026-W33
+  hoursBooked       Decimal               @default(0) @db.Decimal(6, 2)
+  hoursConsumed     Decimal               @default(0) @db.Decimal(6, 2) // written by Karbon sync
+  status            CapacityBookingStatus @default(REQUESTED)
+  rateCentsSnapshot Int? // loaded rate locked at confirmation
+  requestedBy       String?
+  confirmedBy       String?
+  releasedAt        DateTime?
+  chargeFlag        Boolean               @default(false) // computed at week close
+  unbookedConsumption Boolean             @default(false) // consumed with no prior booking
+  overBudgetAck     Boolean               @default(false)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  engagement PortfolioEngagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  portfolio  Portfolio           @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  resource   PoolResource        @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  roleBand   RoleBand            @relation(fields: [roleBandId], references: [id])
+
+  @@unique([engagementId, resourceId, isoWeek])
+  @@index([portfolioId, isoWeek])
+  @@index([resourceId, isoWeek])
+  @@index([engagementId])
+}
+
+/// Native time tracking — Pulse's own timesheet, the actuals source for the
+/// Capacity module (replaces any external ledger). One row per person × client
+/// work × day. Entries roll up (by engagement × resource × ISO week) into the
+/// matching CapacityBooking's hoursConsumed, which the economics read.
+model TimeEntry {
+  id           String   @id @default(cuid())
+  resourceId   String
+  engagementId String
+  portfolioId  String // denormalized from engagement
+  roleBandId   String // denormalized from the resource at entry time
+  workDate     DateTime @db.Date
+  isoWeek      String // computed on write, for fast rollup (e.g. 2026-W33)
+  hours        Decimal  @db.Decimal(5, 2)
+  notes        String?  @db.Text
+  billable     Boolean  @default(true)
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  resource   PoolResource        @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  engagement PortfolioEngagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+
+  @@index([engagementId, resourceId, isoWeek])
+  @@index([resourceId, workDate])
+  @@index([engagementId])
+}
+
+/// Weekly settlement record. Closing a week snapshots each portfolio's charges
+/// (consumed labor + booked-unused) and freezes that week's bookings.
+model WeekClose {
+  id        String   @id @default(cuid())
+  isoWeek   String   @unique
+  closedAt  DateTime @default(now())
+  closedBy  String?
+  charges   Json // [{ portfolioId, portfolioName, consumedLaborCents, bookedUnusedCents, totalCents }]
+  createdAt DateTime @default(now())
+}
+
+// ===========================================================================
+// FINANCE — Cash forecasting (13-week + 12-month). Firm-level, driven by data
+// internal to Pulse: signed/won proposal payment schedules (inflow), committed
+// capacity labor + director base (outflow), plus manual recurring/one-off lines
+// for everything not otherwise captured (rent, debt service, taxes, draws).
+// ===========================================================================
+
+enum CashCadence {
+  ONE_TIME
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+/// Cash-forecast assumptions (one row, scope "firm"). Opening cash is pulled
+/// from the QB ledgers (latest balance-sheet cash) but can be overridden;
+/// the rest are the modeling assumptions surfaced on the Assumptions tab.
+// ─────────────────────────── LEAD MAGNETS ───────────────────────────
+// The bridge between Content (which CTAs to magnets) and Leads (which magnet
+// consumption creates + scores). One definition model, one capture model; the
+// same pipeline serves every magnet kind.
+
+enum LeadMagnetKind {
+  EBOOK
+  TEMPLATE
+  TOOL
+  QUIZ
+  AUDIT_CALL
+  CALCULATOR
+  QBO_SNAPSHOT
+  WEBINAR
+  EMAIL_COURSE
+}
+
+enum LeadMagnetStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+/** A lead magnet definition + its public landing page (at /lm/[slug]). */
+model LeadMagnet {
+  id       String           @id @default(cuid())
+  kind     LeadMagnetKind   @default(EBOOK)
+  slug     String           @unique
+  title    String
+  status   LeadMagnetStatus @default(DRAFT)
+
+  // Landing-page copy.
+  headline String?
+  subhead  String?
+  body     String? @db.Text
+  ctaLabel String? // e.g. "Download the guide", "Get my score"
+
+  // Lead scoring: base intent weight added to the lead's trust score on capture.
+  baseScore Int @default(15)
+
+  // Download payload (EBOOK / TEMPLATE / TOOL). S3 key when uploaded; an external
+  // URL as a zero-infra fallback. Delivered as a signed link + optional email.
+  fileStorageKey  String?
+  fileName        String?
+  fileContentType String?
+  fileSizeBytes   Int?
+  downloadUrl     String? // external link fallback (Drive/Dropbox/CDN)
+  deliverByEmail  Boolean @default(true)
+
+  // Per-kind extras (quiz questions, calculator formula, booking event, …).
+  config Json?
+
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  submissions  LeadMagnetSubmission[]
+  views        LeadMagnetView[]
+  contentItems ContentItem[]          @relation("ContentCtaMagnet")
+
+  @@index([status])
+  @@index([kind])
+}
+
+/** One landing-page view — the denominator for conversion rate. Carries the
+ * same source / content attribution as submissions so conversion can be sliced
+ * by traffic source. Recorded client-side (real browser loads, not crawlers). */
+model LeadMagnetView {
+  id            String     @id @default(cuid())
+  magnetId      String
+  magnet        LeadMagnet @relation(fields: [magnetId], references: [id], onDelete: Cascade)
+  source        String?
+  contentItemId String?
+  createdAt     DateTime   @default(now())
+
+  @@index([magnetId])
+}
+
+/** One consumption event: capture → lead. Attribution links back to the content
+ * that drove it; leadId links forward to the created/matched lead. */
+model LeadMagnetSubmission {
+  id       String     @id @default(cuid())
+  magnetId String
+  magnet   LeadMagnet @relation(fields: [magnetId], references: [id], onDelete: Cascade)
+
+  email   String
+  name    String?
+  company String?
+
+  answers Json? // quiz/calculator responses
+  score   Int   @default(0) // base + computed, mirrored onto the lead
+
+  // Attribution: where the click came from.
+  source        String? // free-form / UTM (e.g. "linkedin", "newsletter")
+  contentItemId String?
+  contentItem   ContentItem? @relation("SubmissionSourceContent", fields: [contentItemId], references: [id], onDelete: SetNull)
+
+  leadId String?
+  lead   Lead?  @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([magnetId])
+  @@index([leadId])
+  @@index([email])
+}
+
+/** Per-line-item override for the direct cash forecast: switch a category row
+ * from auto (assumptions) to manual, and store the typed grid values keyed by
+ * column (ymd / iso-week). One row per (mode, category). */
+model CashRowOverride {
+  id        String   @id @default(cuid())
+  mode      String // "daily" | "weekly"
+  category  String // cash-taxonomy key
+  manual    Boolean  @default(false)
+  values    Json     @default("{}") // { columnKey: magnitudeCents } — sign from the category
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([mode, category])
+}
+
+model CashPosition {
+  id                String   @id @default(cuid())
+  scope             String   @unique @default("firm")
+  openingCents      Int      @default(0) // manual override; blank = use QB actual
+  openingAsOf       DateTime @db.Date
+  useQboOpening     Boolean  @default(true) // pull beginning cash from QB automatically
+  minCashCents      Int      @default(0)
+  locLimitCents     Int      @default(0)
+  locOpeningCents   Int      @default(0) // drawn balance at horizon start
+  dnaMonthlyCents   Int      @default(0) // 12-mo indirect: non-cash D&A add-back
+  capexMonthlyCents Int      @default(0) // 12-mo indirect: investing outflow
+  arDays            Int      @default(45) // 12-mo indirect: AR working-capital timing
+  apDays            Int      @default(30) // 12-mo indirect: AP working-capital timing
+  updatedAt         DateTime @updatedAt
+}
+
+/// A manual cash line (recurring or one-off) mapped to a statement category
+/// row. amountCents is per-occurrence, always positive; the category
+/// (cash-taxonomy) sets its section + sign.
+model CashFlowLine {
+  id          String      @id @default(cuid())
+  label       String
+  category    String      @default("other_operating") // cash-taxonomy key
+  amountCents Int
+  cadence     CashCadence @default(MONTHLY)
+  startDate   DateTime    @db.Date
+  endDate     DateTime?   @db.Date
+  active      Boolean     @default(true)
+  // Contractor terms: shift each disbursement forward by the net terms, and
+  // (paid-when-paid) only pay once the matching customer cash is in.
+  netTermsDays Int?
+  paidWhenPaid Boolean    @default(false)
+  createdBy   String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([active])
+}
+
+/// Per-item override of how a QBO AR/AP aging line spreads into the cash
+/// forecast. `itemKey` is a deterministic hash of the open item (kind + entity +
+/// name + doc# + amount) so overrides stick across re-pulls. expectedDate moves
+/// the item to a chosen collection/payment date; excluded drops it entirely.
+model CashAgingOverride {
+  id           String    @id @default(cuid())
+  itemKey      String    @unique
+  kind         String // "AR" | "AP"
+  expectedDate DateTime? @db.Date
+  excluded     Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}

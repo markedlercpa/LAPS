@@ -1,0 +1,146 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { auth } from "@/lib/auth";
+import { setCashConfig, addCashLine, deleteCashLine, setCashRowManual, setCashRowValue } from "@/lib/pace/cash";
+import { setAgingOverride } from "@/lib/pace/aging";
+import { CASH_CATEGORY_MAP } from "@/lib/pace/cash-taxonomy";
+
+async function requireUser() {
+  const session = await auth();
+  return session?.user?.id ?? null;
+}
+
+const toCents = (v: number) => Math.round(v * 100);
+
+const configSchema = z.object({
+  useQboOpening: z.coerce.boolean().default(true),
+  opening: z.coerce.number().default(0),
+  openingAsOf: z.string().min(1),
+  minCash: z.coerce.number().min(0).default(0),
+  locLimit: z.coerce.number().min(0).default(0),
+  locOpening: z.coerce.number().min(0).default(0),
+  dnaMonthly: z.coerce.number().min(0).default(0),
+  capexMonthly: z.coerce.number().min(0).default(0),
+  arDays: z.coerce.number().int().min(0).max(365).default(45),
+  apDays: z.coerce.number().int().min(0).max(365).default(30),
+});
+
+export async function setCashConfigAction(input: unknown) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const parsed = configSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  const d = parsed.data;
+  await setCashConfig({
+    useQboOpening: d.useQboOpening,
+    openingCents: toCents(d.opening),
+    openingAsOf: d.openingAsOf,
+    minCashCents: toCents(d.minCash),
+    locLimitCents: toCents(d.locLimit),
+    locOpeningCents: toCents(d.locOpening),
+    dnaMonthlyCents: toCents(d.dnaMonthly),
+    capexMonthlyCents: toCents(d.capexMonthly),
+    arDays: d.arDays,
+    apDays: d.apDays,
+  });
+  revalidatePath("/finance/cash");
+  revalidatePath("/finance/cash/assumptions");
+  return { ok: true as const };
+}
+
+const lineSchema = z.object({
+  label: z.string().min(1, "Label is required"),
+  category: z.string().refine((c) => !!CASH_CATEGORY_MAP[c], "Pick a category"),
+  amount: z.coerce.number().gt(0, "Amount must be greater than zero"),
+  cadence: z.enum(["ONE_TIME", "WEEKLY", "BIWEEKLY", "MONTHLY"]),
+  startDate: z.string().min(1, "Pick a start date"),
+  endDate: z.string().optional(),
+  netTermsDays: z.coerce.number().int().min(0).max(180).optional().or(z.nan().transform(() => undefined)),
+  paidWhenPaid: z.coerce.boolean().optional(),
+});
+
+export async function addCashLineAction(input: unknown) {
+  const userId = await requireUser();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+  const parsed = lineSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  await addCashLine({
+    label: parsed.data.label,
+    category: parsed.data.category,
+    amountCents: toCents(parsed.data.amount),
+    cadence: parsed.data.cadence,
+    startDate: parsed.data.startDate,
+    endDate: parsed.data.endDate || null,
+    netTermsDays: parsed.data.netTermsDays == null || Number.isNaN(parsed.data.netTermsDays) ? null : parsed.data.netTermsDays,
+    paidWhenPaid: parsed.data.paidWhenPaid ?? false,
+    createdBy: userId,
+  });
+  revalidatePath("/finance/cash");
+  revalidatePath("/finance/cash/assumptions");
+  return { ok: true as const };
+}
+
+export async function deleteCashLineAction(id: string) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  await deleteCashLine(id);
+  revalidatePath("/finance/cash");
+  revalidatePath("/finance/cash/assumptions");
+  return { ok: true as const };
+}
+
+const agingOverrideSchema = z.object({
+  itemKey: z.string().min(1),
+  kind: z.enum(["AR", "AP"]),
+  expectedDate: z.string().optional().nullable(),
+  excluded: z.coerce.boolean().default(false),
+});
+
+const rowManualSchema = z.object({
+  mode: z.enum(["daily", "weekly"]),
+  category: z.string().min(1),
+  manual: z.coerce.boolean(),
+});
+
+/** Toggle a cash-forecast line item between assumptions (auto) and manual override. */
+export async function setCashRowManualAction(input: unknown) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const parsed = rowManualSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  await setCashRowManual(parsed.data.mode, parsed.data.category, parsed.data.manual);
+  revalidatePath("/finance/cash");
+  return { ok: true as const };
+}
+
+const rowValueSchema = z.object({
+  mode: z.enum(["daily", "weekly"]),
+  category: z.string().min(1),
+  columnKey: z.string().min(1),
+  amount: z.coerce.number().min(0).default(0), // magnitude in dollars
+});
+
+/** Save one typed cell of a manual-override line item. */
+export async function setCashRowValueAction(input: unknown) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const parsed = rowValueSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  await setCashRowValue(parsed.data.mode, parsed.data.category, parsed.data.columnKey, Math.round(parsed.data.amount * 100));
+  revalidatePath("/finance/cash");
+  return { ok: true as const };
+}
+
+/** Save how one AR/AP open item spreads: a chosen date and/or exclude it. */
+export async function setAgingOverrideAction(input: unknown) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const parsed = agingOverrideSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  await setAgingOverride({
+    itemKey: parsed.data.itemKey,
+    kind: parsed.data.kind,
+    expectedDate: parsed.data.expectedDate && /^\d{4}-\d{2}-\d{2}$/.test(parsed.data.expectedDate) ? parsed.data.expectedDate : null,
+    excluded: parsed.data.excluded,
+  });
+  revalidatePath("/finance/cash");
+  revalidatePath("/finance/cash/assumptions");
+  return { ok: true as const };
+}

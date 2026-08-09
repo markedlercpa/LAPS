@@ -1,0 +1,131 @@
+# Render Blueprint — provisions the LAPS web service + Postgres in one step.
+# Deploy via the Render MCP, or in the Render dashboard: New → Blueprint → pick this repo.
+databases:
+  - name: laps-db
+    databaseName: laps
+    user: laps
+    plan: free
+
+services:
+  - type: web
+    name: laps
+    runtime: node
+    plan: free
+    branch: claude/laps-sales-cycle-saas-2twnnv
+    # build runs `prisma migrate deploy` (creates the schema) then `next build`
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /signin
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: laps-db
+          property: connectionString
+      - key: AUTH_SECRET
+        generateValue: true
+      # Dev login disabled in production — Microsoft 365 is the only way in.
+      - key: ALLOW_DEV_LOGIN
+        value: "false"
+      # Public URL so Auth.js redirects to the deployed host (not localhost).
+      # Update this if the service URL changes.
+      - key: AUTH_URL
+        value: https://laps-wxm8.onrender.com
+      - key: NEXTAUTH_URL
+        value: https://laps-wxm8.onrender.com
+      # Public base URL used in booking confirmation/reminder links.
+      - key: NEXT_PUBLIC_APP_URL
+        value: https://laps-wxm8.onrender.com
+      # Microsoft 365 sign-in + Graph email/calendar. Set the values in the
+      # Render dashboard (Environment tab) — they are secrets, never committed.
+      - key: AUTH_MICROSOFT_ENTRA_ID_ID
+        sync: false
+      - key: AUTH_MICROSOFT_ENTRA_ID_SECRET
+        sync: false
+      - key: AUTH_MICROSOFT_ENTRA_ID_ISSUER
+        sync: false
+      # Stripe deposit collection. Set in the Render dashboard (test keys first).
+      # When unset, proposals sign without collecting a deposit.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      # Bearer token for the agent HTTP API (/api/agent/*). Generate a strong
+      # random value; agents send it as `Authorization: Bearer <key>`.
+      - key: AGENT_API_KEY
+        generateValue: true
+      # ECHO Fireflies evidence feed. Set in the Render dashboard. When unset,
+      # ECHO's Fireflies import shows "not connected".
+      - key: FIREFLIES_API_KEY
+        sync: false
+      # Embedded chat assistant (Anthropic). Set the key in the Render dashboard;
+      # when unset, the in-app assistant shows "not configured" (503).
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Optional model override for the assistant (defaults to claude-opus-5).
+      - key: ANTHROPIC_AGENT_MODEL
+        sync: false
+      # STAPLE file storage (S3-compatible: AWS S3 / Cloudflare R2 / Backblaze /
+      # MinIO). Set in the Render dashboard. When unset, STAPLE runs on file
+      # metadata only (upload disabled) and the rest of delivery works normally.
+      - key: STAPLE_S3_BUCKET
+        sync: false
+      - key: STAPLE_S3_REGION
+        sync: false
+      - key: STAPLE_S3_ACCESS_KEY_ID
+        sync: false
+      - key: STAPLE_S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: STAPLE_S3_ENDPOINT
+        sync: false
+      # PACE QuickBooks Online (Actuals). Set in the Render dashboard. When
+      # unset, PACE runs on manual/CSV trial-balance import; the nightly sync is
+      # a no-op.
+      - key: QBO_CLIENT_ID
+        sync: false
+      - key: QBO_CLIENT_SECRET
+        sync: false
+      - key: QBO_ENVIRONMENT
+        sync: false
+      - key: QBO_REDIRECT_URI
+        sync: false
+      # Shared secret guarding the reminder cron endpoint. The cron job below
+      # sends it as a bearer token.
+      - key: CRON_SECRET
+        generateValue: true
+      - key: NODE_VERSION
+        value: "22"
+
+  # Hourly ping to send booking reminder emails for calls in the next 24h.
+  - type: cron
+    name: laps-booking-reminders
+    runtime: node
+    plan: free
+    branch: claude/laps-sales-cycle-saas-2twnnv
+    schedule: "0 * * * *"
+    buildCommand: "true"
+    startCommand: >
+      node -e "fetch(process.env.REMINDER_URL,{method:'POST',headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(r=>r.text()).then(t=>{console.log(t)}).catch(e=>{console.error(e);process.exit(1)})"
+    envVars:
+      - key: REMINDER_URL
+        value: https://laps-wxm8.onrender.com/api/cron/booking-reminders
+      - key: CRON_SECRET
+        sync: false
+
+  # Nightly PACE actuals sync — pulls current + prior month TB from QBO for every
+  # connected entity. No-op until QBO is configured + an entity is connected.
+  - type: cron
+    name: laps-pace-sync
+    runtime: node
+    plan: free
+    branch: claude/laps-sales-cycle-saas-2twnnv
+    schedule: "0 5 * * *"
+    buildCommand: "true"
+    startCommand: >
+      node -e "fetch(process.env.PACE_SYNC_URL,{method:'POST',headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(r=>r.text()).then(t=>{console.log(t)}).catch(e=>{console.error(e);process.exit(1)})"
+    envVars:
+      - key: PACE_SYNC_URL
+        value: https://laps-wxm8.onrender.com/api/cron/pace-sync
+      - key: CRON_SECRET
+        sync: false
+

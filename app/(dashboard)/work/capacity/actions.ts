@@ -1,0 +1,313 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { auth } from "@/lib/auth";
+import {
+  createResource,
+  createPortfolio,
+  createEngagement,
+  replaceEngagementBudget,
+  addRoleBandRate,
+  bulkImportResources,
+  ensureRoleBandsSeeded,
+} from "@/lib/work/capacity";
+import { logTime, deleteTimeEntry } from "@/lib/work/time";
+import { requestBooking, confirmBooking, declineBooking, releaseBooking, editBookingHours } from "@/lib/work/bookings";
+import { closeWeek } from "@/lib/work/weekclose";
+import { addPnlAdjustment } from "@/lib/work/pnl";
+import { ENGAGEMENT_TYPES } from "@/lib/work-taxonomy";
+
+async function requireUser() {
+  const session = await auth();
+  return session?.user?.id ?? null;
+}
+
+const dollarsToCents = (v: number) => Math.round(v * 100);
+
+const resourceSchema = z.object({
+  personName: z.string().min(1, "Name is required"),
+  email: z.string().email("Valid email required"),
+  roleBandId: z.string().min(1, "Pick a role band"),
+  weeklyCapacityHours: z.coerce.number().min(0).max(80).default(40),
+  skillTags: z.array(z.string()).default([]),
+  location: z.string().optional(),
+  costExempt: z.coerce.boolean().default(false),
+});
+
+export async function createResourceAction(input: unknown) {
+  const userId = await requireUser();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+  await ensureRoleBandsSeeded();
+  const parsed = resourceSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  try {
+    const r = await createResource({ ...parsed.data, createdBy: userId });
+    revalidatePath("/work/capacity/resources");
+    return { ok: true as const, id: r.id };
+  } catch {
+    return { ok: false as const, error: "A resource with that email already exists." };
+  }
+}
+
+const portfolioSchema = z.object({
+  name: z.string().min(1, "Name is required"),
+  fiscalYear: z.coerce.number().int().min(2000).max(2100).optional().or(z.nan().transform(() => undefined)),
+  directorName: z.string().min(1, "Director name is required"),
+  directorEmail: z.string().email("Valid email required"),
+  directorCostAnnual: z.coerce.number().min(0).default(0),
+  declaredRevenue: z.coerce.number().min(0).default(0),
+  gpTargetPct: z.coerce.number().min(0).max(1).default(0.5),
+});
+
+export async function createPortfolioAction(input: unknown) {
+  const userId = await requireUser();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+  const parsed = portfolioSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  const p = await createPortfolio({
+    name: parsed.data.name,
+    fiscalYear: parsed.data.fiscalYear == null || Number.isNaN(parsed.data.fiscalYear) ? null : parsed.data.fiscalYear,
+    directorName: parsed.data.directorName,
+    directorEmail: parsed.data.directorEmail,
+    directorCostCentsAnnual: dollarsToCents(parsed.data.directorCostAnnual),
+    declaredPortfolioRevenueCents: dollarsToCents(parsed.data.declaredRevenue),
+    gpTargetPct: parsed.data.gpTargetPct,
+    createdBy: userId,
+  });
+  revalidatePath("/work/capacity/portfolios");
+  return { ok: true as const, id: p.id };
+}
+
+const engagementSchema = z.object({
+  portfolioId: z.string().min(1, "Pick a portfolio"),
+  clientName: z.string().min(1, "Client name is required"),
+  engagementType: z.enum(ENGAGEMENT_TYPES).default("other"),
+  revenue: z.coerce.number().min(0).default(0),
+  startWeek: z.string().optional(),
+  endWeek: z.string().optional(),
+});
+
+export async function createEngagementAction(input: unknown) {
+  const userId = await requireUser();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+  const parsed = engagementSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  // Firm policy: all engagements recognize revenue on % of completion.
+  const e = await createEngagement({
+    portfolioId: parsed.data.portfolioId,
+    clientName: parsed.data.clientName,
+    engagementType: parsed.data.engagementType,
+    revenueCents: dollarsToCents(parsed.data.revenue),
+    revenueRecognition: "pct_hours",
+    startWeek: parsed.data.startWeek || null,
+    endWeek: parsed.data.endWeek || null,
+    createdBy: userId,
+  });
+  revalidatePath("/work/capacity/engagements");
+  return { ok: true as const, id: e.id };
+}
+
+const budgetSchema = z.object({
+  engagementId: z.string().min(1),
+  rows: z.array(z.object({ roleBandId: z.string().min(1), budgetedHours: z.coerce.number().min(0) })),
+});
+
+export async function saveEngagementBudgetAction(input: unknown) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const parsed = budgetSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  const res = await replaceEngagementBudget(parsed.data.engagementId, parsed.data.rows);
+  revalidatePath(`/work/capacity/engagements/${parsed.data.engagementId}`);
+  return res;
+}
+
+const rateSchema = z.object({
+  roleBandId: z.string().min(1),
+  loadedRate: z.coerce.number().min(0),
+  billRate: z.coerce.number().min(0).optional(),
+  effectiveFrom: z.string().min(1),
+  fiscalYear: z.coerce.number().int().min(2000).max(2100).optional().or(z.nan().transform(() => undefined)),
+  note: z.string().optional(),
+});
+
+export async function addRoleBandRateAction(input: unknown) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const parsed = rateSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  await addRoleBandRate({
+    roleBandId: parsed.data.roleBandId,
+    loadedRateCents: dollarsToCents(parsed.data.loadedRate),
+    billRateCents: parsed.data.billRate != null ? dollarsToCents(parsed.data.billRate) : null,
+    effectiveFrom: parsed.data.effectiveFrom,
+    fiscalYear: parsed.data.fiscalYear == null || Number.isNaN(parsed.data.fiscalYear) ? null : parsed.data.fiscalYear,
+    note: parsed.data.note || null,
+  });
+  revalidatePath("/work/capacity/admin");
+  return { ok: true as const };
+}
+
+/**
+ * Import a roster CSV (e.g. from Karbon) into pool resources. Recognized columns
+ * (case-insensitive header, else positional): name, email, band, capacity,
+ * location, director. Band matches an existing role band by name.
+ */
+export async function importResourcesCsvAction(csv: string) {
+  const userId = await requireUser();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+  await ensureRoleBandsSeeded();
+  const lines = csv.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return { ok: false as const, error: "Nothing to import." };
+
+  const HEADERS = ["name", "email", "band", "capacity", "location", "director"];
+  const first = lines[0].toLowerCase();
+  const hasHeader = HEADERS.some((h) => first.includes(h)) && first.includes("email");
+  const cols = hasHeader ? lines[0].split(",").map((c) => c.trim().toLowerCase()) : null;
+  const dataLines = hasHeader ? lines.slice(1) : lines;
+  const idx = (name: string, fallback: number) => (cols ? cols.indexOf(name) : fallback);
+  const map = {
+    name: idx("name", 0),
+    email: idx("email", 1),
+    band: idx("band", 2),
+    capacity: idx("capacity", 3),
+    location: idx("location", 4),
+    director: idx("director", 5),
+  };
+
+  const rows = dataLines
+    .map((line) => {
+      const c = line.split(",").map((x) => x.trim());
+      const at = (i: number) => (i >= 0 ? c[i] : undefined) || undefined;
+      const cap = Number(at(map.capacity));
+      const dir = (at(map.director) ?? "").toLowerCase();
+      return {
+        personName: at(map.name) ?? "",
+        email: at(map.email) ?? "",
+        bandName: at(map.band) ?? "",
+        weeklyCapacityHours: Number.isFinite(cap) && cap > 0 ? cap : 40,
+        location: at(map.location) ?? null,
+        costExempt: ["y", "yes", "true", "1", "director"].includes(dir),
+      };
+    })
+    .filter((r) => r.email && r.personName);
+
+  const res = await bulkImportResources(rows, userId);
+  revalidatePath("/work/capacity/resources");
+  return { ok: true as const, ...res };
+}
+
+// ── Time tracking (native actuals) ──────────────────────────────────────────
+
+const timeSchema = z.object({
+  resourceId: z.string().min(1, "Pick a resource"),
+  engagementId: z.string().min(1, "Pick an engagement"),
+  workDate: z.string().min(1, "Pick a date"),
+  hours: z.coerce.number().gt(0, "Hours must be greater than zero").max(24, "That's more than a day"),
+  notes: z.string().optional(),
+  billable: z.coerce.boolean().default(true),
+});
+
+export async function logTimeAction(input: unknown) {
+  const userId = await requireUser();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+  const parsed = timeSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  const res = await logTime({ ...parsed.data, notes: parsed.data.notes || null, createdBy: userId });
+  if (res.ok) {
+    revalidatePath("/work/capacity/time");
+    revalidatePath(`/work/capacity/engagements/${parsed.data.engagementId}`);
+  }
+  return res;
+}
+
+export async function deleteTimeEntryAction(id: string) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const res = await deleteTimeEntry(id);
+  revalidatePath("/work/capacity/time");
+  return res;
+}
+
+// ── Booking lifecycle (hoteling board) ──────────────────────────────────────
+
+const bookingSchema = z.object({
+  engagementId: z.string().min(1, "Pick an engagement"),
+  resourceId: z.string().min(1, "Pick a resource"),
+  isoWeek: z.string().regex(/^\d{4}-W\d{2}$/, "Bad ISO week"),
+  hoursBooked: z.coerce.number().gt(0, "Hours must be greater than zero").max(80),
+  overBudgetAck: z.coerce.boolean().default(false),
+});
+
+function revalidateBoard() {
+  revalidatePath("/work/capacity/grid");
+  revalidatePath("/work/capacity/queue");
+}
+
+export async function requestBookingAction(input: unknown) {
+  const userId = await requireUser();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+  const parsed = bookingSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  const res = await requestBooking({ ...parsed.data, requestedBy: userId });
+  if (res.ok) revalidateBoard();
+  return res;
+}
+
+export async function confirmBookingAction(id: string) {
+  const userId = await requireUser();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+  const res = await confirmBooking(id, userId);
+  if (res.ok) revalidateBoard();
+  return res;
+}
+
+export async function declineBookingAction(id: string) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const res = await declineBooking(id);
+  if (res.ok) revalidateBoard();
+  return res;
+}
+
+export async function releaseBookingAction(id: string) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const res = await releaseBooking(id);
+  if (res.ok) revalidateBoard();
+  return res;
+}
+
+export async function editBookingHoursAction(id: string, hours: number) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const res = await editBookingHours(id, hours);
+  if (res.ok) revalidateBoard();
+  return res;
+}
+
+export async function closeWeekAction(isoWeek: string) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const res = await closeWeek(isoWeek);
+  if (res.ok) {
+    revalidateBoard();
+    revalidatePath("/work/capacity/engagements");
+  }
+  return res;
+}
+
+const adjustmentSchema = z.object({
+  portfolioId: z.string().min(1),
+  amount: z.coerce.number(), // dollars, signed
+  memo: z.string().min(1, "Memo is required"),
+});
+
+export async function addPnlAdjustmentAction(input: unknown) {
+  const userId = await requireUser();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+  const parsed = adjustmentSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  await addPnlAdjustment({
+    portfolioId: parsed.data.portfolioId,
+    amountCents: Math.round(parsed.data.amount * 100),
+    memo: parsed.data.memo,
+    createdBy: userId,
+  });
+  revalidatePath(`/work/capacity/portfolios/${parsed.data.portfolioId}`);
+  return { ok: true as const };
+}

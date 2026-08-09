@@ -1,0 +1,50 @@
+name: CI
+
+# Runs on every push and pull request: confirms the app still builds and has no
+# TypeScript errors. A Postgres service is provided so the Prisma migration step
+# in the build can run.
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: laps
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/laps
+      AUTH_SECRET: ci-not-a-real-secret
+      NEXTAUTH_URL: http://localhost:3000
+      ALLOW_DEV_LOGIN: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build (runs prisma migrate deploy + next build)
+        run: npm run build
