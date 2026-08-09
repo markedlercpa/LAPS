@@ -14,6 +14,8 @@ export type CashLineRow = {
   cadence: string;
   startDate: string;
   endDate: string | null;
+  netTermsDays: number | null;
+  paidWhenPaid: boolean;
 };
 
 const SECTIONS: { key: "RECEIPTS" | "DISBURSEMENTS" | "FINANCING"; label: string }[] = [
@@ -55,66 +57,32 @@ export function CashLines({ rows }: { rows: CashLineRow[] }) {
     });
   }
 
-  return (
-    <div>
-      <form id="cash-line-form" action={add} className="card mb-3 flex flex-wrap items-end gap-2 p-4">
-        <label className="field flex-1 min-w-[160px]">
-          <span className="micro-label">Label</span>
-          <input name="label" className="input" required placeholder="Office rent" />
-        </label>
-        <label className="field min-w-[200px]">
-          <span className="micro-label">Category</span>
-          <select name="category" className="input" defaultValue="rent_occupancy" required>
-            {SECTIONS.map((s) => (
-              <optgroup key={s.key} label={s.label}>
-                {CASH_CATEGORIES.filter((c) => c.section === s.key).map((c) => (
-                  <option key={c.key} value={c.key}>{c.label}</option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span className="micro-label">Amount ($)</span>
-          <input name="amount" type="number" step="0.01" min="0" className="input w-32 text-right" required />
-        </label>
-        <label className="field">
-          <span className="micro-label">Cadence</span>
-          <select name="cadence" className="input" defaultValue="MONTHLY">
-            {Object.entries(CADENCE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-        </label>
-        <label className="field">
-          <span className="micro-label">Start</span>
-          <input name="startDate" type="date" className="input" defaultValue={today} required />
-        </label>
-        <label className="field">
-          <span className="micro-label">End (optional)</span>
-          <input name="endDate" type="date" className="input" />
-        </label>
-        <label className="field">
-          <span className="micro-label">Net terms (days)</span>
-          <input name="netTermsDays" type="number" min="0" max="180" className="input w-24 text-right" placeholder="e.g. 30" title="Contractor net terms — shifts the payment forward by this many days (net-15 / net-30)." />
-        </label>
-        <label className="flex items-center gap-1.5 pb-2 text-[12px]" title="Pay only once the matching customer cash is collected (modeled as the net-terms shift).">
-          <input name="paidWhenPaid" type="checkbox" /> Paid when paid
-        </label>
-        <button type="submit" className="btn btn-primary" disabled={pending}><Plus className="h-4 w-4" /> Add line</button>
-        {msg && <span className="pb-2 text-[12px] text-accent-700">{msg}</span>}
-      </form>
+  const catOptions = (
+    <>
+      {SECTIONS.map((s) => (
+        <optgroup key={s.key} label={s.label}>
+          {CASH_CATEGORIES.filter((c) => c.section === s.key).map((c) => (
+            <option key={c.key} value={c.key}>{c.label}</option>
+          ))}
+        </optgroup>
+      ))}
+    </>
+  );
 
-      {rows.length === 0 ? (
-        <p className="text-[13px] text-muted">No manual lines yet. Add recurring items (rent, debt service, taxes, owner draws, LOC) or one-offs — they populate the matching statement row.</p>
-      ) : (
-        <table className="table">
+  return (
+    <form id="cash-line-form" action={add}>
+      <div className="overflow-x-auto">
+        <table className="table align-bottom">
           <thead>
             <tr>
               <th>Label</th>
               <th>Category</th>
+              <th className="num">Amount ($)</th>
               <th>Cadence</th>
-              <th>From</th>
-              <th>To</th>
-              <th className="num">Amount</th>
+              <th>Start</th>
+              <th>End</th>
+              <th>Net terms</th>
+              <th title="Pay only once the matching customer cash is collected (modeled as the net-terms shift).">Paid when paid</th>
               <th></th>
             </tr>
           </thead>
@@ -125,23 +93,51 @@ export function CashLines({ rows }: { rows: CashLineRow[] }) {
                 <tr key={r.id}>
                   <td className="font-heading font-extrabold">{r.label}</td>
                   <td className="text-muted">{def?.label ?? r.category}</td>
-                  <td className="text-muted">{CADENCE_LABELS[r.cadence] ?? r.cadence}</td>
-                  <td className="text-muted">{r.startDate}</td>
-                  <td className="text-muted">{r.endDate ?? "—"}</td>
                   <td className={`num ${def && def.sign < 0 ? "text-accent-700" : ""}`}>
                     {def && def.sign < 0 ? "(" : ""}${r.amount.toLocaleString()}{def && def.sign < 0 ? ")" : ""}
                   </td>
+                  <td className="text-muted">{CADENCE_LABELS[r.cadence] ?? r.cadence}</td>
+                  <td className="text-muted">{r.startDate}</td>
+                  <td className="text-muted">{r.endDate ?? "—"}</td>
+                  <td className="text-muted">{r.netTermsDays != null ? `net-${r.netTermsDays}` : "—"}</td>
+                  <td className="text-muted">{r.paidWhenPaid ? "Yes" : "—"}</td>
                   <td className="text-right">
-                    <button className="btn btn-ghost btn-icon" disabled={pending} onClick={() => del(r.id)} aria-label="Delete" title="Delete">
+                    <button type="button" className="btn btn-ghost btn-icon" disabled={pending} onClick={() => del(r.id)} aria-label="Delete" title="Delete">
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </td>
                 </tr>
               );
             })}
+
+            {/* Inline add-a-line row */}
+            <tr className="bg-surface">
+              <td><input name="label" className="input" required placeholder="e.g. Office rent" /></td>
+              <td>
+                <select name="category" className="input" defaultValue="rent_occupancy" required>{catOptions}</select>
+              </td>
+              <td><input name="amount" type="number" step="0.01" min="0" className="input w-28 text-right" required placeholder="0.00" /></td>
+              <td>
+                <select name="cadence" className="input" defaultValue="MONTHLY">
+                  {Object.entries(CADENCE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </td>
+              <td><input name="startDate" type="date" className="input" defaultValue={today} required /></td>
+              <td><input name="endDate" type="date" className="input" /></td>
+              <td><input name="netTermsDays" type="number" min="0" max="180" className="input w-20 text-right" placeholder="30" title="Contractor net terms — shifts the payment forward by this many days (net-15 / net-30)." /></td>
+              <td className="text-center"><input name="paidWhenPaid" type="checkbox" title="Pay only once the matching customer cash is collected." /></td>
+              <td className="text-right">
+                <button type="submit" className="btn btn-primary btn-icon" disabled={pending} aria-label="Add line" title="Add line"><Plus className="h-4 w-4" /></button>
+              </td>
+            </tr>
           </tbody>
         </table>
-      )}
-    </div>
+      </div>
+      <div className="mt-2 flex items-center gap-3">
+        <button type="submit" className="btn btn-secondary" disabled={pending}><Plus className="h-4 w-4" /> Add another line</button>
+        {msg && <span className="text-[12px] text-accent-700">{msg}</span>}
+        {rows.length === 0 && <span className="text-[12px] text-muted">Fill the bottom row and add recurring items (rent, debt service, taxes, owner draws, LOC) or one-offs — each feeds its matching statement row.</span>}
+      </div>
+    </form>
   );
 }

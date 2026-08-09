@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
-import { setCashConfig, addCashLine, deleteCashLine } from "@/lib/pace/cash";
+import { setCashConfig, addCashLine, deleteCashLine, setCashRowManual, setCashRowValue } from "@/lib/pace/cash";
 import { setAgingOverride } from "@/lib/pace/aging";
 import { CASH_CATEGORY_MAP } from "@/lib/pace/cash-taxonomy";
 
@@ -95,6 +95,39 @@ const agingOverrideSchema = z.object({
   expectedDate: z.string().optional().nullable(),
   excluded: z.coerce.boolean().default(false),
 });
+
+const rowManualSchema = z.object({
+  mode: z.enum(["daily", "weekly"]),
+  category: z.string().min(1),
+  manual: z.coerce.boolean(),
+});
+
+/** Toggle a cash-forecast line item between assumptions (auto) and manual override. */
+export async function setCashRowManualAction(input: unknown) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const parsed = rowManualSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  await setCashRowManual(parsed.data.mode, parsed.data.category, parsed.data.manual);
+  revalidatePath("/finance/cash");
+  return { ok: true as const };
+}
+
+const rowValueSchema = z.object({
+  mode: z.enum(["daily", "weekly"]),
+  category: z.string().min(1),
+  columnKey: z.string().min(1),
+  amount: z.coerce.number().min(0).default(0), // magnitude in dollars
+});
+
+/** Save one typed cell of a manual-override line item. */
+export async function setCashRowValueAction(input: unknown) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const parsed = rowValueSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid" };
+  await setCashRowValue(parsed.data.mode, parsed.data.category, parsed.data.columnKey, Math.round(parsed.data.amount * 100));
+  revalidatePath("/finance/cash");
+  return { ok: true as const };
+}
 
 /** Save how one AR/AP open item spreads: a chosen date and/or exclude it. */
 export async function setAgingOverrideAction(input: unknown) {

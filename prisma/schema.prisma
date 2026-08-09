@@ -1579,6 +1579,21 @@ enum CashCadence {
 /// Cash-forecast assumptions (one row, scope "firm"). Opening cash is pulled
 /// from the QB ledgers (latest balance-sheet cash) but can be overridden;
 /// the rest are the modeling assumptions surfaced on the Assumptions tab.
+/** Per-line-item override for the direct cash forecast: switch a category row
+ * from auto (assumptions) to manual, and store the typed grid values keyed by
+ * column (ymd / iso-week). One row per (mode, category). */
+model CashRowOverride {
+  id        String   @id @default(cuid())
+  mode      String // "daily" | "weekly"
+  category  String // cash-taxonomy key
+  manual    Boolean  @default(false)
+  values    Json     @default("{}") // { columnKey: magnitudeCents } — sign from the category
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([mode, category])
+}
+
 model CashPosition {
   id                String   @id @default(cuid())
   scope             String   @unique @default("firm")

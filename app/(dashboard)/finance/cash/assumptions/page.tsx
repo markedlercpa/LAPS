@@ -33,6 +33,8 @@ export default async function CashAssumptionsPage() {
     cadence: l.cadence,
     startDate: l.startDate.toISOString().slice(0, 10),
     endDate: l.endDate ? l.endDate.toISOString().slice(0, 10) : null,
+    netTermsDays: l.netTermsDays ?? null,
+    paidWhenPaid: l.paidWhenPaid ?? false,
   }));
 
   return (

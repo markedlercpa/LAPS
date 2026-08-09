@@ -145,6 +145,7 @@ export type DirectForecast = {
   minThreshold: number;
   cushion: number[];
   sources: CashSources;
+  manual: Record<string, boolean>; // category → is this row a manual override (vs assumptions)
 };
 
 const sum = (a: number[]) => a.reduce((s, x) => s + x, 0);
@@ -361,6 +362,19 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
   // Actuals: real bank-cash movement into the trailing columns (coarse buckets).
   await fillActualCash(columns, firstFc, mode, cat);
 
+  // Per-row manual overrides: a category switched to "manual" ignores its
+  // assumptions and takes the values typed into the grid (forecast columns
+  // only; actuals stay real). Magnitude stored positive, sign from the category.
+  const rowOverrides = await getCashRowOverrides(mode);
+  const manual: Record<string, boolean> = {};
+  for (const [catKey, ov] of rowOverrides) {
+    if (!ov.manual) continue;
+    const def = CASH_CATEGORY_MAP[catKey];
+    if (!def || !cat[catKey]) continue;
+    manual[catKey] = true;
+    for (let i = firstFc; i < n; i++) cat[catKey][i] = (ov.values[columns[i].key] ?? 0) * def.sign;
+  }
+
   const mkGroup = (title: string, section: "RECEIPTS" | "DISBURSEMENTS" | "FINANCING", subtotalLabel: string): StatementGroup => {
     const rows: StatementRow[] = categoriesFor(section).map((c) => ({ key: c.key, label: c.label, values: cat[c.key], total: fsum(cat[c.key]) }));
     const subtotal = zero();
@@ -425,7 +439,37 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
     minThreshold,
     cushion,
     sources,
+    manual,
   };
+}
+
+/** Per-(mode, category) manual-override state for the direct forecast. */
+export async function getCashRowOverrides(mode: "daily" | "weekly"): Promise<Map<string, { manual: boolean; values: Record<string, number> }>> {
+  const rows = await prisma.cashRowOverride.findMany({ where: { mode } });
+  return new Map(rows.map((r) => [r.category, { manual: r.manual, values: (r.values ?? {}) as Record<string, number> }]));
+}
+
+export async function setCashRowManual(mode: "daily" | "weekly", category: string, manual: boolean) {
+  await prisma.cashRowOverride.upsert({
+    where: { mode_category: { mode, category } },
+    update: { manual },
+    create: { mode, category, manual, values: {} },
+  });
+  return { ok: true as const };
+}
+
+/** Set (or clear, when 0) one manual grid cell; enabling manual implicitly. */
+export async function setCashRowValue(mode: "daily" | "weekly", category: string, columnKey: string, magnitudeCents: number) {
+  const existing = await prisma.cashRowOverride.findUnique({ where: { mode_category: { mode, category } } });
+  const values = { ...((existing?.values ?? {}) as Record<string, number>) };
+  if (magnitudeCents === 0) delete values[columnKey];
+  else values[columnKey] = magnitudeCents;
+  await prisma.cashRowOverride.upsert({
+    where: { mode_category: { mode, category } },
+    update: { values, manual: existing?.manual ?? true },
+    create: { mode, category, manual: true, values },
+  });
+  return { ok: true as const };
 }
 
 // ── 12-month indirect 3-statement (P&L from budgets) ─────────────────────────
