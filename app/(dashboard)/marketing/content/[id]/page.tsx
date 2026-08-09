@@ -41,6 +41,11 @@ export default async function ContentEditorPage({
     prisma.contentModule.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
     listBannedPhrases(),
   ]);
+  const magnets = await prisma.leadMagnet.findMany({
+    where: { status: "PUBLISHED" },
+    orderBy: { title: "asc" },
+    select: { id: true, title: true, slug: true },
+  });
 
   return (
     <div>
@@ -61,6 +66,7 @@ export default async function ContentEditorPage({
           moduleId: item.moduleId,
           publishedUrl: item.publishedUrl,
           publishedAt: item.publishedAt ? item.publishedAt.toISOString() : null,
+          ctaMagnetId: item.ctaMagnetId,
         }}
         linkedEvidence={item.evidence.map((e) => ({
           id: e.id,
@@ -75,6 +81,7 @@ export default async function ContentEditorPage({
         }))}
         allCards={allCards.map((c) => ({ id: c.id, text: c.cardText, category: c.category }))}
         modules={modules}
+        magnets={magnets}
         source={item.sourceItem}
         derivatives={item.derivatives}
         bannedPhrases={banned.map((b) => b.phrase)}

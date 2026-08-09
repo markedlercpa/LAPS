@@ -78,6 +78,7 @@ const updateSchema = z.object({
   pillarTags: z.array(pillar).optional(),
   moduleId: z.string().nullable().optional(),
   publishedUrl: z.string().nullable().optional(),
+  ctaMagnetId: z.string().nullable().optional(),
 });
 
 export async function updateContentItem(input: unknown) {
@@ -108,6 +109,7 @@ export async function updateContentItem(input: unknown) {
   if (rest.pillarTags !== undefined) data.pillarTags = rest.pillarTags;
   if (rest.moduleId !== undefined) data.moduleId = rest.moduleId || null;
   if (rest.publishedUrl !== undefined) data.publishedUrl = rest.publishedUrl;
+  if (rest.ctaMagnetId !== undefined) data.ctaMagnetId = rest.ctaMagnetId || null;
 
   await prisma.contentItem.update({ where: { id }, data });
   revalidatePath(`/marketing/content/${id}`);

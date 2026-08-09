@@ -29,6 +29,7 @@ import {
   Scale,
   FileBarChart,
   Crosshair,
+  Magnet,
   LogOut,
   type LucideIcon,
 } from "lucide-react";
@@ -67,6 +68,7 @@ const MODULES: Module[] = [
       { href: "/marketing/evidence", label: "Evidence", icon: Vault },
       { href: "/marketing/calling-cards", label: "Keywords & Phrases", icon: Megaphone },
       { href: "/marketing/content", label: "Content Builder", icon: PenLine },
+      { href: "/marketing/lead-magnets", label: "Lead Magnets", icon: Magnet },
       { href: "/marketing/optics", label: "Content Performance", icon: LineChart },
     ],
   },

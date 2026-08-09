@@ -35,6 +35,7 @@ export function ContentEditor({
   allEvidence,
   allCards,
   modules,
+  magnets,
   source,
   derivatives,
   bannedPhrases,
@@ -50,12 +51,14 @@ export function ContentEditor({
     moduleId: string | null;
     publishedUrl: string | null;
     publishedAt: string | null;
+    ctaMagnetId: string | null;
   };
   linkedEvidence: EvidenceRef[];
   linkedCards: CardRef[];
   allEvidence: EvidenceRef[];
   allCards: CardRef[];
   modules: { id: string; name: string }[];
+  magnets: { id: string; title: string; slug: string }[];
   source: { id: string; title: string } | null;
   derivatives: { id: string; title: string; channel: ContentChannel }[];
   bannedPhrases: string[];
@@ -73,6 +76,7 @@ export function ContentEditor({
   const [body, setBody] = useState(item.body);
   const [pillarTags, setPillarTags] = useState<QoOPillar[]>(item.pillarTags);
   const [publishedUrl, setPublishedUrl] = useState(item.publishedUrl ?? "");
+  const [ctaMagnetId, setCtaMagnetId] = useState(item.ctaMagnetId ?? "");
 
   // Keep fields in sync when server data changes (e.g. after a link refresh).
   useEffect(() => setTitle(item.title), [item.title]);
@@ -95,6 +99,7 @@ export function ContentEditor({
         body,
         pillarTags,
         publishedUrl: publishedUrl || null,
+        ctaMagnetId: ctaMagnetId || null,
       });
       if (!res.ok) setError(res.error ?? "Save failed");
       else {
@@ -210,6 +215,20 @@ export function ContentEditor({
           <div className="field">
             <label>Published URL</label>
             <input className="input" value={publishedUrl} onChange={(e) => setPublishedUrl(e.target.value)} placeholder="https://…" />
+          </div>
+          <div className="field">
+            <label>CTA lead magnet</label>
+            <select className="input" value={ctaMagnetId} onChange={(e) => setCtaMagnetId(e.target.value)}>
+              <option value="">None</option>
+              {magnets.map((m) => (
+                <option key={m.id} value={m.id}>{m.title}</option>
+              ))}
+            </select>
+            {ctaMagnetId && (
+              <p className="mt-1 text-[11px] text-muted">
+                Link this post to <code>/lm/{magnets.find((m) => m.id === ctaMagnetId)?.slug}?c={item.id}</code> so consumption is attributed here.
+              </p>
+            )}
           </div>
           <div>
             <label className="mb-1 block text-[12px] text-muted">QoO pillars</label>

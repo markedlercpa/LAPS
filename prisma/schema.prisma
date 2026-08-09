@@ -117,6 +117,7 @@ model Lead {
   proposals    Proposal[]
   actionItems  ActionItem[]
   trustSignals TrustSignal[]
+  magnetSubmissions LeadMagnetSubmission[]
 
   @@index([stage])
   @@index([ownerId])
@@ -716,6 +717,11 @@ model ContentItem {
   cards    CallingCard[]    @relation("ContentCards")
   metrics  MetricSnapshot[]
 
+  // The lead magnet this content CTAs to (Content → Lead Magnet bridge).
+  ctaMagnetId String?
+  ctaMagnet   LeadMagnet?              @relation("ContentCtaMagnet", fields: [ctaMagnetId], references: [id], onDelete: SetNull)
+  magnetHits  LeadMagnetSubmission[]   @relation("SubmissionSourceContent")
+
   publishedUrl String?
   publishedAt  DateTime?
   scheduledFor DateTime?
@@ -725,6 +731,7 @@ model ContentItem {
   @@index([status])
   @@index([channel])
   @@index([moduleId])
+  @@index([ctaMagnetId])
 }
 
 // ── O — Optics: how content performed once published ──────────────────────
@@ -1579,6 +1586,98 @@ enum CashCadence {
 /// Cash-forecast assumptions (one row, scope "firm"). Opening cash is pulled
 /// from the QB ledgers (latest balance-sheet cash) but can be overridden;
 /// the rest are the modeling assumptions surfaced on the Assumptions tab.
+// ─────────────────────────── LEAD MAGNETS ───────────────────────────
+// The bridge between Content (which CTAs to magnets) and Leads (which magnet
+// consumption creates + scores). One definition model, one capture model; the
+// same pipeline serves every magnet kind.
+
+enum LeadMagnetKind {
+  EBOOK
+  TEMPLATE
+  TOOL
+  QUIZ
+  AUDIT_CALL
+  CALCULATOR
+  QBO_SNAPSHOT
+  WEBINAR
+  EMAIL_COURSE
+}
+
+enum LeadMagnetStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+/** A lead magnet definition + its public landing page (at /lm/[slug]). */
+model LeadMagnet {
+  id       String           @id @default(cuid())
+  kind     LeadMagnetKind   @default(EBOOK)
+  slug     String           @unique
+  title    String
+  status   LeadMagnetStatus @default(DRAFT)
+
+  // Landing-page copy.
+  headline String?
+  subhead  String?
+  body     String? @db.Text
+  ctaLabel String? // e.g. "Download the guide", "Get my score"
+
+  // Lead scoring: base intent weight added to the lead's trust score on capture.
+  baseScore Int @default(15)
+
+  // Download payload (EBOOK / TEMPLATE / TOOL). S3 key when uploaded; an external
+  // URL as a zero-infra fallback. Delivered as a signed link + optional email.
+  fileStorageKey  String?
+  fileName        String?
+  fileContentType String?
+  fileSizeBytes   Int?
+  downloadUrl     String? // external link fallback (Drive/Dropbox/CDN)
+  deliverByEmail  Boolean @default(true)
+
+  // Per-kind extras (quiz questions, calculator formula, booking event, …).
+  config Json?
+
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  submissions  LeadMagnetSubmission[]
+  contentItems ContentItem[]          @relation("ContentCtaMagnet")
+
+  @@index([status])
+  @@index([kind])
+}
+
+/** One consumption event: capture → lead. Attribution links back to the content
+ * that drove it; leadId links forward to the created/matched lead. */
+model LeadMagnetSubmission {
+  id       String     @id @default(cuid())
+  magnetId String
+  magnet   LeadMagnet @relation(fields: [magnetId], references: [id], onDelete: Cascade)
+
+  email   String
+  name    String?
+  company String?
+
+  answers Json? // quiz/calculator responses
+  score   Int   @default(0) // base + computed, mirrored onto the lead
+
+  // Attribution: where the click came from.
+  source        String? // free-form / UTM (e.g. "linkedin", "newsletter")
+  contentItemId String?
+  contentItem   ContentItem? @relation("SubmissionSourceContent", fields: [contentItemId], references: [id], onDelete: SetNull)
+
+  leadId String?
+  lead   Lead?  @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([magnetId])
+  @@index([leadId])
+  @@index([email])
+}
+
 /** Per-line-item override for the direct cash forecast: switch a category row
  * from auto (assumptions) to manual, and store the typed grid values keyed by
  * column (ymd / iso-week). One row per (mode, category). */
