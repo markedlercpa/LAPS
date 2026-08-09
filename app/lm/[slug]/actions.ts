@@ -5,6 +5,7 @@ import { captureSubmission, type CaptureInput, type CaptureResult } from "@/lib/
 import { asQuizConfig, scoreQuiz, type QuizBand } from "@/lib/leadmagnets/quiz";
 import { asAuditConfig, scoreAudit, qualifies } from "@/lib/leadmagnets/audit";
 import { asCalculatorConfig, computeCalculator } from "@/lib/leadmagnets/calculator";
+import { asSnapshotConfig, computeSnapshot, type SnapshotInputs, type SnapshotResult } from "@/lib/leadmagnets/snapshot";
 
 /** Public (unauthenticated) lead-magnet capture. Runs the Content → Leads
  * bridge and returns download access for file magnets. */
@@ -124,4 +125,39 @@ export async function captureCalculatorAction(input: {
   if (!cap.ok) return { ok: false, error: cap.error };
 
   return { ok: true, output, outputLabel: config.outputLabel, outputUnit: config.outputUnit, band, bookingSlug: config.bookingSlug ?? null };
+}
+
+export type SnapshotResponse =
+  | { ok: false; error: string }
+  | { ok: true; result: SnapshotResult; bookingSlug: string | null };
+
+/** Public financial-snapshot submission: compute the health metrics + valuation
+ * range from the entered figures, capture the lead, and return the snapshot. */
+export async function captureSnapshotAction(input: {
+  slug: string;
+  email: string;
+  name?: string | null;
+  company?: string | null;
+  inputs: SnapshotInputs;
+  source?: string | null;
+  contentItemId?: string | null;
+}): Promise<SnapshotResponse> {
+  const magnet = await prisma.leadMagnet.findFirst({ where: { slug: input.slug, status: "PUBLISHED", kind: "QBO_SNAPSHOT" } });
+  if (!magnet) return { ok: false, error: "This snapshot isn’t available." };
+
+  const config = asSnapshotConfig(magnet.config);
+  const result = computeSnapshot(config, input.inputs);
+
+  const cap = await captureSubmission({
+    slug: input.slug,
+    email: input.email,
+    name: input.name,
+    company: input.company,
+    source: input.source,
+    contentItemId: input.contentItemId,
+    answers: { inputs: input.inputs, score: result.score, band: result.bandLabel, adjEbitda: result.adjEbitda, valuationLow: result.valuationLow, valuationHigh: result.valuationHigh },
+  });
+  if (!cap.ok) return { ok: false, error: cap.error };
+
+  return { ok: true, result, bookingSlug: config.bookingSlug ?? null };
 }

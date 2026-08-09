@@ -11,7 +11,7 @@ export const KIND_LABELS: Record<LeadMagnetKindKey, string> = {
   QUIZ: "Quiz / scorecard",
   AUDIT_CALL: "Diagnostic / audit call",
   CALCULATOR: "Interactive calculator",
-  QBO_SNAPSHOT: "QuickBooks snapshot",
+  QBO_SNAPSHOT: "Financial snapshot",
   WEBINAR: "Webinar / masterclass",
   EMAIL_COURSE: "Email course",
 };
@@ -42,7 +42,7 @@ export function isDownloadKind(kind: string): boolean {
 }
 
 /** Kinds that are wired end-to-end today; others are scaffolded for later phases. */
-export const LIVE_KINDS: LeadMagnetKindKey[] = ["EBOOK", "TEMPLATE", "TOOL", "QUIZ", "AUDIT_CALL", "CALCULATOR"];
+export const LIVE_KINDS: LeadMagnetKindKey[] = ["EBOOK", "TEMPLATE", "TOOL", "QUIZ", "AUDIT_CALL", "CALCULATOR", "QBO_SNAPSHOT"];
 export function isLiveKind(kind: string): boolean {
   return (LIVE_KINDS as string[]).includes(kind);
 }

@@ -4,10 +4,12 @@ import { isDownloadKind } from "@/lib/leadmagnets/taxonomy";
 import { asQuizConfig } from "@/lib/leadmagnets/quiz";
 import { asAuditConfig } from "@/lib/leadmagnets/audit";
 import { asCalculatorConfig } from "@/lib/leadmagnets/calculator";
+import { asSnapshotConfig } from "@/lib/leadmagnets/snapshot";
 import { MagnetCapture } from "@/components/leadmagnets/magnet-capture";
 import { QuizRunner } from "@/components/leadmagnets/quiz-runner";
 import { AuditRunner } from "@/components/leadmagnets/audit-runner";
 import { CalculatorRunner } from "@/components/leadmagnets/calculator-runner";
+import { SnapshotRunner } from "@/components/leadmagnets/snapshot-runner";
 
 export const dynamic = "force-dynamic";
 
@@ -30,8 +32,9 @@ export default async function LeadMagnetPage({
   const isQuiz = magnet.kind === "QUIZ";
   const isAudit = magnet.kind === "AUDIT_CALL";
   const isCalc = magnet.kind === "CALCULATOR";
-  const ctaLabel = magnet.ctaLabel || (isQuiz ? "Start the quiz" : isAudit ? "Apply now" : isCalc ? "Calculate" : isDownload ? "Get the download" : "Get access");
-  const eyebrow = isQuiz ? "Free assessment" : isAudit ? "Apply for a call" : isCalc ? "Free calculator" : "Free resource";
+  const isSnapshot = magnet.kind === "QBO_SNAPSHOT";
+  const ctaLabel = magnet.ctaLabel || (isQuiz ? "Start the quiz" : isAudit ? "Apply now" : isCalc ? "Calculate" : isSnapshot ? "Get my snapshot" : isDownload ? "Get the download" : "Get access");
+  const eyebrow = isQuiz ? "Free assessment" : isAudit ? "Apply for a call" : isCalc ? "Free calculator" : isSnapshot ? "Free financial snapshot" : "Free resource";
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-14">
@@ -67,6 +70,15 @@ export default async function LeadMagnetPage({
           body={magnet.body}
           ctaLabel={ctaLabel}
           config={asCalculatorConfig(magnet.config)}
+          source={source}
+          contentItemId={contentItemId}
+        />
+      ) : isSnapshot ? (
+        <SnapshotRunner
+          slug={magnet.slug}
+          body={magnet.body}
+          ctaLabel={ctaLabel}
+          config={asSnapshotConfig(magnet.config)}
           source={source}
           contentItemId={contentItemId}
         />

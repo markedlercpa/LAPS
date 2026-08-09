@@ -8,6 +8,7 @@ import { putObject, storageConfigured } from "@/lib/staple/storage";
 import { asQuizConfig } from "@/lib/leadmagnets/quiz";
 import { asAuditConfig } from "@/lib/leadmagnets/audit";
 import { asCalculatorConfig } from "@/lib/leadmagnets/calculator";
+import { asSnapshotConfig } from "@/lib/leadmagnets/snapshot";
 
 async function requireUser() {
   const session = await auth();
@@ -92,6 +93,14 @@ export async function saveAuditConfigAction(id: string, config: unknown) {
 export async function saveCalculatorConfigAction(id: string, config: unknown) {
   if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
   await updateMagnet(id, { config: asCalculatorConfig(config) as unknown as object });
+  revalidatePath(`/marketing/lead-magnets/${id}`);
+  return { ok: true as const };
+}
+
+/** Save the financial-snapshot config (valuation multiples + benchmark targets). */
+export async function saveSnapshotConfigAction(id: string, config: unknown) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  await updateMagnet(id, { config: asSnapshotConfig(config) as unknown as object });
   revalidatePath(`/marketing/lead-magnets/${id}`);
   return { ok: true as const };
 }
