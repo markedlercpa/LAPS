@@ -39,7 +39,8 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
 async function DirectView(mode: "daily" | "weekly") {
   const f = await buildDirectForecast(mode);
   const endingLast = f.ending[f.ending.length - 1] ?? f.opening.cents;
-  const lowestEnding = Math.min(...(f.ending.length ? f.ending : [f.opening.cents]));
+  const fcEnding = f.ending.slice(f.firstFc); // forecast horizon only
+  const lowestEnding = Math.min(...(fcEnding.length ? fcEnding : [f.opening.cents]));
 
   return (
     <>

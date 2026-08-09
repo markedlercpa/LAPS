@@ -20,12 +20,15 @@ const rowLabel = "sticky left-0 z-10 bg-bg px-3 py-1 text-left whitespace-nowrap
 
 export function CashStatement({ f }: { f: DirectForecast }) {
   const cols = f.columns;
+  const ff = f.firstFc;
+  const actualCell = (i: number) => (i < ff ? "bg-surface" : "");
+  const boundary = (i: number) => (i === ff && ff > 0 ? "border-l border-ink/40" : "");
   const totalCol = (r: StatementRow) => fmt(r.total);
   const spanValues = (values: number[], total: string | null, opts: { strong?: boolean; sub?: boolean; label: string; muted?: boolean }) => (
     <tr className={opts.strong ? "border-t-2 border-ink" : ""}>
       <td className={`${rowLabel} ${opts.strong ? "font-heading font-extrabold" : opts.sub ? "pl-6 text-muted" : ""}`}>{opts.label}</td>
       {values.map((v, i) => (
-        <td key={i} className={`${numCell} ${opts.strong ? "font-heading font-extrabold" : ""} ${v < 0 ? "text-accent-700" : opts.muted ? "text-muted" : ""}`}>{fmt(v)}</td>
+        <td key={i} className={`${numCell} ${actualCell(i)} ${boundary(i)} ${opts.strong ? "font-heading font-extrabold" : ""} ${v < 0 ? "text-accent-700" : opts.muted ? "text-muted" : ""}`}>{fmt(v)}</td>
       ))}
       <td className={`${numCell} border-l border-divider ${opts.strong ? "font-heading font-extrabold" : "text-muted"}`}>{total ?? ""}</td>
     </tr>
@@ -42,18 +45,24 @@ export function CashStatement({ f }: { f: DirectForecast }) {
       <table className="border-collapse text-[12px]">
         <thead>
           <tr>
+            <th className={rowLabel}></th>
+            {ff > 0 && <th colSpan={ff} className={`${numCell} micro-label bg-surface text-left`}>Actuals</th>}
+            <th colSpan={cols.length - ff} className={`${numCell} micro-label ${ff > 0 ? "border-l border-ink/40" : ""} text-left`}>Forecast</th>
+            <th className={`${numCell} border-l border-divider`}></th>
+          </tr>
+          <tr>
             <th className={`${rowLabel} micro-label`}>{isDaily ? "Day #" : "Week #"}</th>
-            {cols.map((c) => <th key={c.num} className={`${numCell} micro-label`}>{c.num}</th>)}
+            {cols.map((c, i) => <th key={i} className={`${numCell} micro-label ${actualCell(i)} ${boundary(i)}`}>{c.num}</th>)}
             <th className={`${numCell} micro-label border-l border-divider`}>Total</th>
           </tr>
           <tr>
             <th className={`${rowLabel} micro-label`}>{isDaily ? "Date" : "Week Ending (Fri)"}</th>
-            {cols.map((c) => <th key={c.num} className={`${numCell} micro-label`}>{c.date}</th>)}
+            {cols.map((c, i) => <th key={i} className={`${numCell} micro-label ${actualCell(i)} ${boundary(i)}`}>{c.date}</th>)}
             <th className={`${numCell} border-l border-divider`}></th>
           </tr>
           <tr>
             <th className={`${rowLabel} micro-label text-neutral-500`}>{isDaily ? "Day" : "Week Start"}</th>
-            {cols.map((c) => <th key={c.num} className={`${numCell} micro-label text-neutral-500`}>{c.sub}</th>)}
+            {cols.map((c, i) => <th key={i} className={`${numCell} micro-label text-neutral-500 ${actualCell(i)} ${boundary(i)}`}>{c.sub}</th>)}
             <th className={`${numCell} border-l border-divider`}></th>
           </tr>
         </thead>

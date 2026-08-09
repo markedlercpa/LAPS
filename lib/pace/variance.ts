@@ -53,22 +53,38 @@ export function basisMonths(periodMonthISO: string, basis: Basis): string[] {
   return Array.from({ length: m - qStart + 1 }, (_, i) => key(qStart + i));
 }
 
-/** Actual natural-side amount per ledger account across the given months. */
-async function actualsByAccount(entityId: string | null, months: string[]) {
+function isBeginningBalance(txnType: string | null): boolean {
+  return (txnType ?? "").trim().toLowerCase() === "beginning balance";
+}
+
+/**
+ * Actual natural-side amount per ledger account across the given months. IS
+ * actuals come from the general ledger (period activity, beginning balances
+ * excluded) so the P&L doesn't inflate; BS actuals come from the trial balance.
+ */
+async function actualsByAccount(entityId: string | null, months: string[], statement: StatementKind) {
   const monthDates = months.map((m) => new Date(`${m}-01`));
-  const periods = await prisma.trialBalancePeriod.findMany({
-    where: { periodMonth: { in: monthDates }, ...(entityId ? { entityId } : {}) },
-    include: { lines: { include: { ledgerAccount: true } } },
-  });
   const out = new Map<string, number>();
-  for (const p of periods) {
-    for (const l of p.lines) {
-      const a = l.ledgerAccount;
-      const def = classifyAccount({ accountType: a.sourceType, classification: a.classification });
-      const signed = Number(l.amount);
-      const mag = def.naturalSide === "CREDIT" ? -signed : signed;
-      out.set(a.id, (out.get(a.id) ?? 0) + mag);
+  const add = (a: { id: string; sourceType: string | null; classification: string | null }, signed: number) => {
+    const def = classifyAccount({ accountType: a.sourceType, classification: a.classification });
+    const mag = def.naturalSide === "CREDIT" ? -signed : signed;
+    out.set(a.id, (out.get(a.id) ?? 0) + mag);
+  };
+  if (statement === "IS") {
+    const gl = await prisma.generalLedgerLine.findMany({
+      where: { periodMonth: { in: monthDates }, ...(entityId ? { entityId } : {}) },
+      include: { ledgerAccount: true },
+    });
+    for (const l of gl) {
+      if (!l.ledgerAccount || isBeginningBalance(l.txnType)) continue;
+      add(l.ledgerAccount, Number(l.amount));
     }
+  } else {
+    const periods = await prisma.trialBalancePeriod.findMany({
+      where: { periodMonth: { in: monthDates }, ...(entityId ? { entityId } : {}) },
+      include: { lines: { include: { ledgerAccount: true } } },
+    });
+    for (const p of periods) for (const l of p.lines) add(l.ledgerAccount, Number(l.amount));
   }
   return out;
 }
@@ -95,7 +111,7 @@ export async function computeVariance(input: {
       where: { budgetId: input.budgetId },
       include: { ledgerAccount: { select: { id: true, name: true, acctNum: true, sourceType: true, classification: true } } },
     }),
-    actualsByAccount(input.entityId, months),
+    actualsByAccount(input.entityId, months, statement),
   ]);
 
   // Union of accounts appearing in the budget or the actuals, on this statement.

@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { isoWeekOf, isoWeekStart } from "@/lib/work-taxonomy";
 import { rateForBandWeek } from "@/lib/work/capacity";
-import { latestBankCashCents } from "@/lib/pace/statements";
+import { latestBankCashCents, buildStatement } from "@/lib/pace/statements";
 import { classifyAccount } from "@/lib/pace/qbo-taxonomy";
 import { qboConfigured, pullArAging, pullApAging, type AgingItem } from "@/lib/pace/qbo";
 import { agingItemKey, effectiveAgingDate, getAgingOverrides, type AgingKind, type AgingOverride } from "@/lib/pace/aging";
@@ -40,32 +40,39 @@ function todayUtc(): Date {
   return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()));
 }
 
-export type Column = { num: number; date: string; sub: string; key: string };
+export type Column = { num: number; date: string; sub: string; key: string; actual: boolean };
 
-function dailyColumns(n: number): Column[] {
-  const start = todayUtc();
-  return Array.from({ length: n }, (_, i) => {
+/** `back` trailing actual periods + `fwd` forecast periods. num is negative for
+ * actuals (…-2, -1) and 1-based for the forecast, so the split reads at a glance. */
+function dailyColumns(back: number, fwd: number): Column[] {
+  const origin = todayUtc();
+  const start = new Date(origin);
+  start.setUTCDate(origin.getUTCDate() - back);
+  return Array.from({ length: back + fwd }, (_, i) => {
     const d = new Date(start);
     d.setUTCDate(start.getUTCDate() + i);
-    return { num: i + 1, date: mmddyy(d), sub: d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" }), key: ymd(d) };
+    return { num: i - back + 1, date: mmddyy(d), sub: d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" }), key: ymd(d), actual: i < back };
   });
 }
-function weeklyColumns(n: number): Column[] {
-  const start = isoWeekStart(isoWeekOf(new Date()));
-  return Array.from({ length: n }, (_, i) => {
+function weeklyColumns(back: number, fwd: number): Column[] {
+  const origin = isoWeekStart(isoWeekOf(new Date()));
+  const start = new Date(origin);
+  start.setUTCDate(origin.getUTCDate() - back * 7);
+  return Array.from({ length: back + fwd }, (_, i) => {
     const mon = new Date(start);
     mon.setUTCDate(start.getUTCDate() + i * 7);
     const fri = new Date(mon);
     fri.setUTCDate(mon.getUTCDate() + 4);
-    return { num: i + 1, date: mmddyy(fri), sub: mmddyy(mon), key: isoWeekOf(mon) };
+    return { num: i - back + 1, date: mmddyy(fri), sub: mmddyy(mon), key: isoWeekOf(mon), actual: i < back };
   });
 }
-function monthlyColumns(n: number): Column[] {
+function monthlyColumns(back: number, fwd: number): Column[] {
   const first = new Date(Date.UTC(todayUtc().getUTCFullYear(), todayUtc().getUTCMonth(), 1));
-  return Array.from({ length: n }, (_, i) => {
-    const s = addMonths(first, i);
+  const start = addMonths(first, -back);
+  return Array.from({ length: back + fwd }, (_, i) => {
+    const s = addMonths(start, i);
     const key = `${s.getUTCFullYear()}-${String(s.getUTCMonth() + 1).padStart(2, "0")}`;
-    return { num: i + 1, date: s.toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }), sub: "", key };
+    return { num: i - back + 1, date: s.toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }), sub: "", key, actual: i < back };
   });
 }
 
@@ -127,6 +134,7 @@ export type CashSources = {
 export type DirectForecast = {
   mode: CashMode;
   columns: Column[];
+  firstFc: number; // index of the first forecast column (columns before it are actuals)
   opening: { cents: number; auto: boolean; asOf: string | null };
   beginning: number[];
   groups: StatementGroup[]; // RECEIPTS, DISBURSEMENTS
@@ -141,15 +149,84 @@ export type DirectForecast = {
 
 const sum = (a: number[]) => a.reduce((s, x) => s + x, 0);
 
+// Trailing actuals brought into each direct view.
+const DAILY_BACK = 7, DAILY_FWD = 14;
+const WEEKLY_BACK = 4, WEEKLY_FWD = 13;
+
+function periodStartUtc(col: Column, mode: CashMode): Date {
+  if (mode === "daily") return new Date(`${col.key}T00:00:00Z`);
+  if (mode === "weekly") return isoWeekStart(col.key);
+  return new Date(`${col.key}-01T00:00:00Z`);
+}
+function periodEndUtc(col: Column, mode: CashMode): Date {
+  if (mode === "daily") { const d = new Date(`${col.key}T00:00:00Z`); d.setUTCHours(23, 59, 59); return d; }
+  if (mode === "weekly") { const m = isoWeekStart(col.key); const e = new Date(m); e.setUTCDate(m.getUTCDate() + 6); e.setUTCHours(23, 59, 59); return e; }
+  return new Date(Date.UTC(Number(col.key.slice(0, 4)), Number(col.key.slice(5, 7)), 0, 23, 59, 59));
+}
+
+/**
+ * Fill the actual (trailing) columns from real bank-cash movement in the ledger,
+ * bucketed coarsely: customer collections → AR Collections, vendor bill payments
+ * → AP Payments, payroll → Payroll, everything else in / out → Other Receipts /
+ * Other Operating. Net and ending cash are exact regardless of the bucket split.
+ */
+async function fillActualCash(columns: Column[], firstFc: number, mode: CashMode, cat: Record<string, number[]>): Promise<void> {
+  if (firstFc <= 0) return;
+  const start = periodStartUtc(columns[0], mode);
+  const end = periodEndUtc(columns[firstFc - 1], mode);
+  const lines = await prisma.generalLedgerLine.findMany({
+    where: { txnDate: { gte: start, lte: end } },
+    select: { id: true, externalTxnId: true, txnDate: true, amount: true, ledgerAccount: { select: { sourceType: true, name: true } } },
+  });
+  // Group a transaction's lines so we can read its counterparty side.
+  const groups = new Map<string, typeof lines>();
+  for (const l of lines) {
+    const k = l.externalTxnId ?? `solo:${l.id}`;
+    const g = groups.get(k);
+    if (g) g.push(l); else groups.set(k, [l]);
+  }
+  for (const g of groups.values()) {
+    let bankDelta = 0;
+    const other: { type: string | null; name: string }[] = [];
+    for (const l of g) {
+      const type = l.ledgerAccount?.sourceType ?? null;
+      if (type === "Bank") bankDelta += Number(l.amount);
+      else other.push({ type, name: l.ledgerAccount?.name ?? "" });
+    }
+    if (Math.abs(bankDelta) < 0.005) continue; // no net cash (e.g. inter-bank transfer)
+    const i = columnIndexForDate(columns, mode, g[0].txnDate);
+    if (i < 0 || i >= firstFc) continue;
+    let key: string;
+    if (bankDelta > 0) {
+      key = other.some((o) => o.type === "Income" || o.type === "Other Income" || o.type === "Accounts Receivable") ? "ar_collections" : "other_receipts";
+    } else if (other.some((o) => o.type === "Accounts Payable")) {
+      key = "ap_payments";
+    } else if (other.some((o) => /payroll|wage|salar/i.test(o.name))) {
+      key = "payroll";
+    } else {
+      key = "other_operating";
+    }
+    cat[key][i] += Math.round(bankDelta * 100); // bankDelta already signed (in +, out −)
+  }
+}
+
 export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<DirectForecast> {
-  const columns = mode === "daily" ? dailyColumns(14) : weeklyColumns(13);
+  const columns = mode === "daily" ? dailyColumns(DAILY_BACK, DAILY_FWD) : weeklyColumns(WEEKLY_BACK, WEEKLY_FWD);
   const n = columns.length;
-  const h0 = mode === "daily" ? new Date(`${columns[0].key}T00:00:00Z`) : isoWeekStart(columns[0].key);
+  const firstFc = columns.findIndex((c) => !c.actual);
+  const fcCount = n - firstFc;
+  const fc0 = columns[firstFc];
+  // Forecast horizon starts at the first *forecast* period (actuals precede it).
+  const h0 = mode === "daily" ? new Date(`${fc0.key}T00:00:00Z`) : isoWeekStart(fc0.key);
   const hN = mode === "daily" ? new Date(`${columns[n - 1].key}T23:59:59Z`) : (() => { const m = isoWeekStart(columns[n - 1].key); m.setUTCDate(m.getUTCDate() + 6); return m; })();
 
   const zero = () => new Array(n).fill(0);
+  const fsum = (a: number[]) => a.slice(firstFc).reduce((s, x) => s + x, 0); // totals = forecast horizon only
   const cat: Record<string, number[]> = {};
-  for (const c of CASH_CATEGORY_MAP ? Object.keys(CASH_CATEGORY_MAP) : []) cat[c] = zero();
+  for (const c of Object.keys(CASH_CATEGORY_MAP)) cat[c] = zero();
+
+  /** Column index for a forecast feed — never lands in an actual column. */
+  const fcIndex = (d: Date): number => { const i = columnIndexForDate(columns, mode, d); return i >= firstFc ? i : -1; };
 
   const [config, lines, payments, bookings, portfolios] = await Promise.all([
     getCashConfig(),
@@ -178,7 +255,7 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
     const shift = l.netTermsDays ?? 0;
     for (const d0 of occurrences({ category: l.category, amountCents: l.amountCents, cadence: l.cadence, startDate: l.startDate, endDate: l.endDate }, h0, hN)) {
       const d = shift ? addDays(d0, shift) : d0;
-      const i = columnIndexForDate(columns, mode, d);
+      const i = fcIndex(d);
       if (i >= 0) cat[l.category][i] += l.amountCents * def.sign;
     }
   }
@@ -188,7 +265,7 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
     if (!p.dueOn) continue;
     const d = new Date(`${p.dueOn.slice(0, 10)}T00:00:00Z`);
     if (Number.isNaN(d.getTime())) continue;
-    const i = columnIndexForDate(columns, mode, d);
+    const i = fcIndex(d);
     if (i >= 0) cat.qofe_projects[i] += Math.round(Number(p.amount) * 100);
   }
 
@@ -199,7 +276,7 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
       const booked = Number(b.hoursBooked);
       if (booked <= 0 || b.resource.costExempt) continue;
       const i = columns.findIndex((c) => c.key === b.isoWeek);
-      if (i < 0) continue;
+      if (i < firstFc) continue; // forecast weeks only
       let rate = b.rateCentsSnapshot ?? -1;
       if (rate < 0) {
         const key = `${b.roleBandId}|${b.isoWeek}`;
@@ -210,7 +287,7 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
     }
     const directorAnnual = portfolios.reduce((s, p) => s + p.directorCostCentsAnnual, 0);
     const perWeek = Math.round(directorAnnual / 52);
-    for (let i = 0; i < n; i++) cat.payroll[i] += -perWeek;
+    for (let i = firstFc; i < n; i++) cat.payroll[i] += -perWeek;
   }
 
   // Auto: AR / AP aging detail from QBO, spread into collections / disbursements
@@ -235,9 +312,9 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
       const raw = effectiveAgingDate(it, ov);
       const d = raw ? new Date(`${raw}T00:00:00Z`) : h0;
       if (Number.isNaN(d.getTime())) continue;
-      const when = d.getTime() < h0.getTime() ? h0 : d; // overdue → first period
+      const when = d.getTime() < h0.getTime() ? h0 : d; // overdue / open → first forecast period
       const i = columnIndexForDate(columns, mode, when);
-      if (i >= 0) {
+      if (i >= firstFc) {
         const c = Math.round(it.amount * 100);
         cat[target][i] += c * sign;
         placed += 1;
@@ -275,17 +352,20 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
       remaining += Math.round(e.revenueCents * (1 - pctComplete));
     }
     if (remaining > 0) {
-      const perCol = Math.round(remaining / n);
-      for (let i = 0; i < n; i++) cat.wip_collections[i] += perCol;
-      sources.wipCents = perCol * n;
+      const perCol = Math.round(remaining / fcCount);
+      for (let i = firstFc; i < n; i++) cat.wip_collections[i] += perCol;
+      sources.wipCents = perCol * fcCount;
     }
   }
 
+  // Actuals: real bank-cash movement into the trailing columns (coarse buckets).
+  await fillActualCash(columns, firstFc, mode, cat);
+
   const mkGroup = (title: string, section: "RECEIPTS" | "DISBURSEMENTS" | "FINANCING", subtotalLabel: string): StatementGroup => {
-    const rows: StatementRow[] = categoriesFor(section).map((c) => ({ key: c.key, label: c.label, values: cat[c.key], total: sum(cat[c.key]) }));
+    const rows: StatementRow[] = categoriesFor(section).map((c) => ({ key: c.key, label: c.label, values: cat[c.key], total: fsum(cat[c.key]) }));
     const subtotal = zero();
     for (const r of rows) for (let i = 0; i < n; i++) subtotal[i] += r.values[i];
-    return { title, rows, subtotalLabel, subtotal, subtotalTotal: sum(subtotal) };
+    return { title, rows, subtotalLabel, subtotal, subtotalTotal: fsum(subtotal) };
   };
   const receipts = mkGroup("RECEIPTS", "RECEIPTS", "Total Receipts");
   const disbursements = mkGroup("DISBURSEMENTS", "DISBURSEMENTS", "Total Disbursements");
@@ -293,12 +373,27 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
 
   const netOperatingValues = zero();
   for (let i = 0; i < n; i++) netOperatingValues[i] = receipts.subtotal[i] + disbursements.subtotal[i];
-  const netOperating: StatementRow = { key: "net_op", label: "Net Operating Cash Flow", values: netOperatingValues, total: sum(netOperatingValues) };
+  const netOperating: StatementRow = { key: "net_op", label: "Net Operating Cash Flow", values: netOperatingValues, total: fsum(netOperatingValues) };
 
-  // Roll cash + LOC.
+  // Roll cash. Anchor beginning-of-first-forecast-period at the opening (latest
+  // QB cash): roll forward for the forecast, and backward through the trailing
+  // actual columns so the actual trajectory ties into today's balance.
   const opening = await effectiveOpening(config);
   const beginning = zero();
   const ending = zero();
+  const netTotal = zero();
+  for (let i = 0; i < n; i++) netTotal[i] = netOperating.values[i] + financing.subtotal[i];
+  for (let i = firstFc; i < n; i++) {
+    beginning[i] = i === firstFc ? opening.cents : ending[i - 1];
+    ending[i] = beginning[i] + netTotal[i];
+  }
+  for (let i = firstFc - 1; i >= 0; i--) {
+    ending[i] = beginning[i + 1];
+    beginning[i] = ending[i] - netTotal[i];
+  }
+
+  // LOC rolls forward from its opening; draws/repayments only occur in forecast
+  // columns, so the actual columns simply carry the opening LOC balance.
   const locBalance = zero();
   const locAvail = zero();
   const totalLiquidity = zero();
@@ -309,8 +404,6 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
   const repay = cat.loc_repayments; // negative values
   let locPrev = config?.locOpeningCents ?? 0;
   for (let i = 0; i < n; i++) {
-    beginning[i] = i === 0 ? opening.cents : ending[i - 1];
-    ending[i] = beginning[i] + netOperating.values[i] + financing.subtotal[i];
     locPrev = locPrev + draws[i] + repay[i]; // repay negative → reduces balance
     locBalance[i] = locPrev;
     locAvail[i] = limit - locPrev;
@@ -321,6 +414,7 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
   return {
     mode,
     columns,
+    firstFc,
     opening,
     beginning,
     groups: [receipts, disbursements],
@@ -338,11 +432,16 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
 export type IndirectRow = { key: string; label: string; values: number[]; strong?: boolean; sub?: boolean };
 export type IndirectForecast = {
   columns: Column[];
+  firstFc: number; // index of the first forecast month (columns before it are actuals)
   opening: { cents: number; auto: boolean; asOf: string | null };
   pnl: IndirectRow[];
   cash: IndirectRow[];
   ending: number[];
 };
+
+// Trailing actual months brought into the 12-month view.
+const MONTHLY_BACK = 3, MONTHLY_FWD = 12;
+type PnlCents = { revenue: number; cogs: number; opex: number; dna: number; interest: number; tax: number };
 
 /** Split an Other-Expense account into the indirect model's below-the-line
  * bucket by name/subtype (no reporting codes anymore). */
@@ -400,17 +499,61 @@ async function budgetPnlMonthly(monthKeys: string[]): Promise<Record<string, { r
   return out;
 }
 
+/** Actual monthly P&L (cents) from cached trial balances, classified natively —
+ * the same figures the Actuals P&L shows — for the trailing actual months. */
+async function actualMonthlyPnl(monthKeys: string[]): Promise<Record<string, PnlCents & { present: boolean }>> {
+  const out: Record<string, PnlCents & { present: boolean }> = {};
+  for (const mk of monthKeys) {
+    const st = await buildStatement(null, `${mk}-01`, "IS");
+    const p: PnlCents & { present: boolean } = { revenue: 0, cogs: 0, opex: 0, dna: 0, interest: 0, tax: 0, present: st.lines.length > 0 };
+    const s = st.subtotals;
+    p.revenue = Math.round(((s.revenue ?? 0) + (s.otherIncome ?? 0)) * 100);
+    p.cogs = Math.round((s.cogs ?? 0) * 100);
+    p.opex = Math.round((s.opex ?? 0) * 100);
+    // Split Other Expense into below-the-line buckets; the rest folds into opex.
+    const oe = st.groups.find((g) => g.section === "OtherExpense");
+    for (const l of oe?.lines ?? []) {
+      const cents = Math.round(l.amount * 100);
+      const bucket = belowLineBucket(l.name, l.accountSubType);
+      if (bucket) p[bucket] += cents;
+      else p.opex += cents;
+    }
+    out[mk] = p;
+  }
+  return out;
+}
+
+/** Real month-end consolidated bank cash (cents) per month, from cached balance
+ * sheets. null when that month has no balance sheet loaded. */
+async function actualMonthEndCash(monthKeys: string[]): Promise<Record<string, number | null>> {
+  const out: Record<string, number | null> = {};
+  for (const mk of monthKeys) {
+    const bs = await buildStatement(null, `${mk}-01`, "BS");
+    const bank = bs.lines.filter((l) => l.accountType === "Bank");
+    out[mk] = bank.length ? Math.round(bank.reduce((s, l) => s + l.amount, 0) * 100) : null;
+  }
+  return out;
+}
+
 export async function buildIndirectForecast(): Promise<IndirectForecast> {
-  const columns = monthlyColumns(12);
+  const columns = monthlyColumns(MONTHLY_BACK, MONTHLY_FWD);
   const n = columns.length;
+  const firstFc = columns.findIndex((c) => !c.actual);
   const keys = columns.map((c) => c.key);
+  const actualKeys = keys.slice(0, firstFc);
   const zero = () => new Array(n).fill(0);
 
-  const [config, pnlByMonth, lines] = await Promise.all([
+  const [config, budgetByMonth, actualByMonth, lines] = await Promise.all([
     getCashConfig(),
     budgetPnlMonthly(keys),
+    actualMonthlyPnl(actualKeys),
     prisma.cashFlowLine.findMany({ where: { active: true, category: { in: ["loc_draws", "loc_repayments", "term_debt_service", "owner_distributions"] } } }),
   ]);
+  // Actual months use real P&L; forecast months use the budget.
+  const pnlByMonth: Record<string, PnlCents> = {};
+  keys.forEach((mk, i) => {
+    pnlByMonth[mk] = i < firstFc && actualByMonth[mk]?.present ? actualByMonth[mk] : budgetByMonth[mk];
+  });
 
   const revenue = zero(), cogs = zero(), grossProfit = zero(), opex = zero(), ebitda = zero();
   const dna = zero(), interest = zero(), tax = zero(), netIncome = zero();
@@ -439,11 +582,12 @@ export async function buildIndirectForecast(): Promise<IndirectForecast> {
     deltaWC[i] = -dAR + dAP; // AR up = cash out; AP up = cash in
   }
 
-  const capex = zero().map(() => -(config?.capexMonthlyCents ?? 0));
+  const capex = zero().map((_, i) => (i < firstFc ? 0 : -(config?.capexMonthlyCents ?? 0)));
 
-  // Financing from the financing category lines, expanded monthly.
+  // Financing from the financing category lines, expanded over the forecast
+  // months only (actual months' financing is already in their real ending cash).
   const financing = zero();
-  const h0 = new Date(`${columns[0].key}-01T00:00:00Z`);
+  const h0 = new Date(`${columns[firstFc].key}-01T00:00:00Z`);
   const last = columns[n - 1];
   const hN = new Date(Date.UTC(Number(last.key.slice(0, 4)), Number(last.key.slice(5, 7)), 0));
   for (const l of lines) {
@@ -451,16 +595,31 @@ export async function buildIndirectForecast(): Promise<IndirectForecast> {
     if (!def) continue;
     for (const d of occurrences({ category: l.category, amountCents: l.amountCents, cadence: l.cadence, startDate: l.startDate, endDate: l.endDate }, h0, hN)) {
       const i = columnIndexForDate(columns, "monthly", d);
-      if (i >= 0) financing[i] += l.amountCents * def.sign;
+      if (i >= firstFc) financing[i] += l.amountCents * def.sign;
     }
   }
+
+  // Real month-end cash for the trailing actual months (from cached balance sheets).
+  const actualEnd = await actualMonthEndCash(actualKeys);
 
   const cfo = zero(), netChange = zero(), ending = zero(), beginning = zero();
   const opening = await effectiveOpening(config);
   for (let i = 0; i < n; i++) {
     cfo[i] = netIncome[i] + dna[i] + deltaWC[i];
     netChange[i] = cfo[i] + capex[i] + financing[i];
-    beginning[i] = i === 0 ? opening.cents : ending[i - 1];
+  }
+  // Actual months: tie ending to real bank balances where we have them, roll
+  // backward/forward from there; forecast months roll off the modeled net change.
+  let prevEnd: number | null = null;
+  for (let i = 0; i < firstFc; i++) {
+    const real = actualEnd[keys[i]];
+    ending[i] = real != null ? real : (prevEnd ?? opening.cents) + netChange[i];
+    beginning[i] = prevEnd ?? ending[i] - netChange[i];
+    netChange[i] = ending[i] - beginning[i]; // reconcile the actual month to real cash
+    prevEnd = ending[i];
+  }
+  for (let i = firstFc; i < n; i++) {
+    beginning[i] = i === firstFc ? (prevEnd ?? opening.cents) : ending[i - 1];
     ending[i] = beginning[i] + netChange[i];
   }
 
@@ -468,6 +627,7 @@ export async function buildIndirectForecast(): Promise<IndirectForecast> {
 
   return {
     columns,
+    firstFc,
     opening,
     pnl: [
       R("revenue", "Revenue", revenue),

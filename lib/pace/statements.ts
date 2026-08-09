@@ -48,6 +48,76 @@ function monthStart(iso: string): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
 }
 
+/** QBO seeds each account's opening figure with a "Beginning Balance" GL row.
+ * Those belong on the balance sheet (carried by the trial balance), never in
+ * P&L period activity — filter them out of any GL-sourced income statement. */
+function isBeginningBalance(txnType: string | null): boolean {
+  return (txnType ?? "").trim().toLowerCase() === "beginning balance";
+}
+
+type LedgerAccountRow = {
+  id: string;
+  externalId: string | null;
+  acctNum: string | null;
+  name: string;
+  fqName: string | null;
+  sourceType: string | null;
+  classification: string | null;
+  accountSubType: string | null;
+};
+type RawLine = { account: LedgerAccountRow; amount: number };
+
+/** Income statement is period *activity* → built from the general ledger
+ * (beginning balances excluded). Balance sheet is a point-in-time *balance* →
+ * built from the trial balance (beginning balances included). */
+async function rawLinesForMonth(entityId: string | null, periodMonth: Date, statement: StatementKind): Promise<RawLine[]> {
+  if (statement === "IS") {
+    const gl = await prisma.generalLedgerLine.findMany({
+      where: { periodMonth, ...(entityId ? { entityId } : {}) },
+      include: { ledgerAccount: true },
+    });
+    const out: RawLine[] = [];
+    for (const l of gl) {
+      if (!l.ledgerAccount || isBeginningBalance(l.txnType)) continue;
+      out.push({ account: l.ledgerAccount, amount: Number(l.amount) });
+    }
+    return out;
+  }
+  const periods = await prisma.trialBalancePeriod.findMany({
+    where: { periodMonth, ...(entityId ? { entityId } : {}) },
+    include: { lines: { include: { ledgerAccount: true } } },
+  });
+  return periods.flatMap((p) => p.lines.map((l) => ({ account: l.ledgerAccount, amount: Number(l.amount) })));
+}
+
+/** Same source split as `rawLinesForMonth`, over a month window, each line tagged
+ * with its month key. IS → general ledger (no beginning balances); BS → trial
+ * balance (balances, including beginning balances). */
+async function rawLinesForWindow(
+  entityId: string | null,
+  windowStart: Date,
+  windowEnd: Date,
+  statement: StatementKind,
+): Promise<(RawLine & { mk: string })[]> {
+  if (statement === "IS") {
+    const gl = await prisma.generalLedgerLine.findMany({
+      where: { periodMonth: { gte: windowStart, lte: windowEnd }, ...(entityId ? { entityId } : {}) },
+      include: { ledgerAccount: true },
+    });
+    const out: (RawLine & { mk: string })[] = [];
+    for (const l of gl) {
+      if (!l.ledgerAccount || isBeginningBalance(l.txnType)) continue;
+      out.push({ account: l.ledgerAccount, amount: Number(l.amount), mk: monthKey(l.periodMonth) });
+    }
+    return out;
+  }
+  const periods = await prisma.trialBalancePeriod.findMany({
+    where: { periodMonth: { gte: windowStart, lte: windowEnd }, ...(entityId ? { entityId } : {}) },
+    include: { lines: { include: { ledgerAccount: true } } },
+  });
+  return periods.flatMap((p) => p.lines.map((l) => ({ account: l.ledgerAccount, amount: Number(l.amount), mk: monthKey(p.periodMonth) })));
+}
+
 function leafName(fqName: string | null, name: string): string {
   if (!fqName) return name;
   const parts = fqName.split(":");
@@ -61,10 +131,7 @@ export async function buildStatement(
 ): Promise<StatementResult> {
   const periodMonth = monthStart(periodMonthISO);
 
-  const periods = await prisma.trialBalancePeriod.findMany({
-    where: { periodMonth, ...(entityId ? { entityId } : {}) },
-    include: { lines: { include: { ledgerAccount: true } } },
-  });
+  const rawLines = await rawLinesForMonth(entityId, periodMonth, statement);
 
   // Aggregate signed amounts per source ledger account, classified natively.
   type Agg = {
@@ -75,34 +142,30 @@ export async function buildStatement(
   };
   const byAccount = new Map<string, Agg>();
 
-  for (const p of periods) {
-    for (const l of p.lines) {
-      const a = l.ledgerAccount;
-      const def = classifyAccount({ accountType: a.sourceType, classification: a.classification });
-      if (def.statement !== statement) continue;
-      const amt = Number(l.amount);
-      const existing = byAccount.get(a.id);
-      if (existing) {
-        existing.signed += amt;
-      } else {
-        byAccount.set(a.id, {
-          naturalSide: def.naturalSide,
-          sortOrder: def.sortOrder,
-          signed: amt,
-          line: {
-            ledgerAccountId: a.id,
-            externalId: a.externalId,
-            acctNum: a.acctNum,
-            name: leafName(a.fqName, a.name),
-            fqName: a.fqName,
-            depth: a.fqName ? a.fqName.split(":").length - 1 : 0,
-            accountType: a.sourceType,
-            accountSubType: a.accountSubType,
-            section: def.section,
-            amount: 0,
-          },
-        });
-      }
+  for (const { account: a, amount: amt } of rawLines) {
+    const def = classifyAccount({ accountType: a.sourceType, classification: a.classification });
+    if (def.statement !== statement) continue;
+    const existing = byAccount.get(a.id);
+    if (existing) {
+      existing.signed += amt;
+    } else {
+      byAccount.set(a.id, {
+        naturalSide: def.naturalSide,
+        sortOrder: def.sortOrder,
+        signed: amt,
+        line: {
+          ledgerAccountId: a.id,
+          externalId: a.externalId,
+          acctNum: a.acctNum,
+          name: leafName(a.fqName, a.name),
+          fqName: a.fqName,
+          depth: a.fqName ? a.fqName.split(":").length - 1 : 0,
+          accountType: a.sourceType,
+          accountSubType: a.accountSubType,
+          section: def.section,
+          amount: 0,
+        },
+      });
     }
   }
 
@@ -264,40 +327,32 @@ export async function buildStatementColumns(
   const windowStart = new Date(`${shiftMonthKey(asOf, -23)}-01T00:00:00Z`);
   const asOfEnd = new Date(Date.UTC(Number(asOf.split("-")[0]), Number(asOf.split("-")[1]), 0));
 
-  const periods = await prisma.trialBalancePeriod.findMany({
-    where: { periodMonth: { gte: windowStart, lte: asOfEnd }, ...(entityId ? { entityId } : {}) },
-    include: { lines: { include: { ledgerAccount: true } } },
-  });
+  const rawLines = await rawLinesForWindow(entityId, windowStart, asOfEnd, statement);
 
   // account id → { meta, natural amount per month key }
   type Acc = { line: Omit<MultiLine, "amounts">; section: QboSection; sortOrder: number; byMonth: Map<string, number> };
   const accounts = new Map<string, Acc>();
-  for (const p of periods) {
-    const mk = monthKey(p.periodMonth);
-    for (const l of p.lines) {
-      const a = l.ledgerAccount;
-      const def = classifyAccount({ accountType: a.sourceType, classification: a.classification });
-      if (def.statement !== statement) continue;
-      const signed = Number(l.amount);
-      const nat = def.naturalSide === "CREDIT" ? -signed : signed;
-      let acc = accounts.get(a.id);
-      if (!acc) {
-        acc = {
-          line: {
-            ledgerAccountId: a.id,
-            acctNum: a.acctNum,
-            name: leafName(a.fqName, a.name),
-            depth: a.fqName ? a.fqName.split(":").length - 1 : 0,
-            accountType: a.sourceType,
-          },
-          section: def.section,
-          sortOrder: def.sortOrder,
-          byMonth: new Map(),
-        };
-        accounts.set(a.id, acc);
-      }
-      acc.byMonth.set(mk, (acc.byMonth.get(mk) ?? 0) + nat);
+  for (const { account: a, amount: signed, mk } of rawLines) {
+    const def = classifyAccount({ accountType: a.sourceType, classification: a.classification });
+    if (def.statement !== statement) continue;
+    const nat = def.naturalSide === "CREDIT" ? -signed : signed;
+    let acc = accounts.get(a.id);
+    if (!acc) {
+      acc = {
+        line: {
+          ledgerAccountId: a.id,
+          acctNum: a.acctNum,
+          name: leafName(a.fqName, a.name),
+          depth: a.fqName ? a.fqName.split(":").length - 1 : 0,
+          accountType: a.sourceType,
+        },
+        section: def.section,
+        sortOrder: def.sortOrder,
+        byMonth: new Map(),
+      };
+      accounts.set(a.id, acc);
     }
+    acc.byMonth.set(mk, (acc.byMonth.get(mk) ?? 0) + nat);
   }
 
   const amountFor = (acc: Acc, col: ColumnKey): number => {
