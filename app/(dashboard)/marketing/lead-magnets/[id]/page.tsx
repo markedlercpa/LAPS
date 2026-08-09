@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { MagnetEditor } from "@/components/leadmagnets/magnet-editor";
+import { QuizBuilder } from "@/components/leadmagnets/quiz-builder";
 import { getMagnet, magnetSubmissions, linkedContent } from "@/lib/leadmagnets/magnets";
 import { storageConfigured } from "@/lib/staple/storage";
 import { KIND_LABELS, type LeadMagnetKindKey } from "@/lib/leadmagnets/taxonomy";
@@ -43,6 +44,7 @@ export default async function LeadMagnetDetail({ params }: { params: Promise<{ i
         />
 
         <div className="space-y-6">
+          {magnet.kind === "QUIZ" && <QuizBuilder magnetId={magnet.id} initial={magnet.config} />}
           {/* Attribution / performance */}
           <div className="card p-4">
             <div className="micro-label mb-2">Performance</div>

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { createMagnet, updateMagnet, setMagnetStatus, deleteMagnet } from "@/lib/leadmagnets/magnets";
 import { putObject, storageConfigured } from "@/lib/staple/storage";
+import { asQuizConfig } from "@/lib/leadmagnets/quiz";
 
 async function requireUser() {
   const session = await auth();
@@ -65,6 +66,15 @@ export async function deleteMagnetAction(id: string) {
   if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
   await deleteMagnet(id);
   revalidatePath("/marketing/lead-magnets");
+  return { ok: true as const };
+}
+
+/** Save the quiz/scorecard config (questions, option weights, score bands). */
+export async function saveQuizConfigAction(id: string, config: unknown) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  const clean = asQuizConfig(config);
+  await updateMagnet(id, { config: clean as unknown as object });
+  revalidatePath(`/marketing/lead-magnets/${id}`);
   return { ok: true as const };
 }
 

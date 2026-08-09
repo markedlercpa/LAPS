@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 import { getPublishedMagnetBySlug } from "@/lib/leadmagnets/magnets";
 import { isDownloadKind } from "@/lib/leadmagnets/taxonomy";
+import { asQuizConfig } from "@/lib/leadmagnets/quiz";
 import { MagnetCapture } from "@/components/leadmagnets/magnet-capture";
+import { QuizRunner } from "@/components/leadmagnets/quiz-runner";
 
 export const dynamic = "force-dynamic";
 
@@ -21,28 +23,41 @@ export default async function LeadMagnetPage({
   const source = sp.src ?? sp.utm_source ?? null;
   const contentItemId = sp.c ?? null;
   const isDownload = isDownloadKind(magnet.kind);
-  const ctaLabel = magnet.ctaLabel || (isDownload ? "Get the download" : "Get access");
+  const isQuiz = magnet.kind === "QUIZ";
+  const ctaLabel = magnet.ctaLabel || (isQuiz ? "Start the quiz" : isDownload ? "Get the download" : "Get access");
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-14">
       <div className="mb-8">
-        <p className="micro-label mb-2">Free resource</p>
+        <p className="micro-label mb-2">{isQuiz ? "Free assessment" : "Free resource"}</p>
         <h1 className="mb-2">{magnet.headline || magnet.title}</h1>
         {magnet.subhead && <p className="text-[16px] text-muted">{magnet.subhead}</p>}
       </div>
 
-      {magnet.body && (
-        <div className="mb-8 whitespace-pre-wrap text-[15px] leading-relaxed">{magnet.body}</div>
+      {isQuiz ? (
+        <QuizRunner
+          slug={magnet.slug}
+          headline={magnet.headline || magnet.title}
+          subhead={magnet.subhead}
+          body={magnet.body}
+          ctaLabel={ctaLabel}
+          config={asQuizConfig(magnet.config)}
+          source={source}
+          contentItemId={contentItemId}
+        />
+      ) : (
+        <>
+          {magnet.body && <div className="mb-8 whitespace-pre-wrap text-[15px] leading-relaxed">{magnet.body}</div>}
+          <MagnetCapture
+            slug={magnet.slug}
+            kind={magnet.kind}
+            ctaLabel={ctaLabel}
+            source={source}
+            contentItemId={contentItemId}
+            isDownload={isDownload}
+          />
+        </>
       )}
-
-      <MagnetCapture
-        slug={magnet.slug}
-        kind={magnet.kind}
-        ctaLabel={ctaLabel}
-        source={source}
-        contentItemId={contentItemId}
-        isDownload={isDownload}
-      />
     </main>
   );
 }

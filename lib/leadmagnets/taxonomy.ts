@@ -42,7 +42,7 @@ export function isDownloadKind(kind: string): boolean {
 }
 
 /** Kinds that are wired end-to-end today; others are scaffolded for later phases. */
-export const LIVE_KINDS: LeadMagnetKindKey[] = ["EBOOK", "TEMPLATE", "TOOL"];
+export const LIVE_KINDS: LeadMagnetKindKey[] = ["EBOOK", "TEMPLATE", "TOOL", "QUIZ"];
 export function isLiveKind(kind: string): boolean {
   return (LIVE_KINDS as string[]).includes(kind);
 }
