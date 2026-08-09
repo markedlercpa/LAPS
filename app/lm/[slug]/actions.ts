@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { captureSubmission, type CaptureInput, type CaptureResult } from "@/lib/leadmagnets/capture";
 import { asQuizConfig, scoreQuiz, type QuizBand } from "@/lib/leadmagnets/quiz";
 import { asAuditConfig, scoreAudit, qualifies } from "@/lib/leadmagnets/audit";
+import { asCalculatorConfig, computeCalculator } from "@/lib/leadmagnets/calculator";
 
 /** Public (unauthenticated) lead-magnet capture. Runs the Content → Leads
  * bridge and returns download access for file magnets. */
@@ -88,4 +89,39 @@ export async function captureAuditAction(input: {
     bookingSlug: qualified ? config.bookingSlug ?? null : null,
     disqualifyMessage: qualified ? null : config.disqualifyMessage ?? null,
   };
+}
+
+export type CalcResult =
+  | { ok: false; error: string }
+  | { ok: true; output: number; outputLabel: string; outputUnit: string; band: QuizBand | null; bookingSlug: string | null };
+
+/** Public calculator submission: evaluate the formula, resolve the band, and
+ * capture the lead (base intent score; the computed value is stored, not scored). */
+export async function captureCalculatorAction(input: {
+  slug: string;
+  email: string;
+  name?: string | null;
+  company?: string | null;
+  values: Record<string, number>;
+  source?: string | null;
+  contentItemId?: string | null;
+}): Promise<CalcResult> {
+  const magnet = await prisma.leadMagnet.findFirst({ where: { slug: input.slug, status: "PUBLISHED", kind: "CALCULATOR" } });
+  if (!magnet) return { ok: false, error: "This calculator isn’t available." };
+
+  const config = asCalculatorConfig(magnet.config);
+  const { output, band } = computeCalculator(config, input.values ?? {});
+
+  const cap = await captureSubmission({
+    slug: input.slug,
+    email: input.email,
+    name: input.name,
+    company: input.company,
+    source: input.source,
+    contentItemId: input.contentItemId,
+    answers: { values: input.values, output, bandKey: band?.key ?? null },
+  });
+  if (!cap.ok) return { ok: false, error: cap.error };
+
+  return { ok: true, output, outputLabel: config.outputLabel, outputUnit: config.outputUnit, band, bookingSlug: config.bookingSlug ?? null };
 }

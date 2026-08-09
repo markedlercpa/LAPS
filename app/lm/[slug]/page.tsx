@@ -3,9 +3,11 @@ import { getPublishedMagnetBySlug } from "@/lib/leadmagnets/magnets";
 import { isDownloadKind } from "@/lib/leadmagnets/taxonomy";
 import { asQuizConfig } from "@/lib/leadmagnets/quiz";
 import { asAuditConfig } from "@/lib/leadmagnets/audit";
+import { asCalculatorConfig } from "@/lib/leadmagnets/calculator";
 import { MagnetCapture } from "@/components/leadmagnets/magnet-capture";
 import { QuizRunner } from "@/components/leadmagnets/quiz-runner";
 import { AuditRunner } from "@/components/leadmagnets/audit-runner";
+import { CalculatorRunner } from "@/components/leadmagnets/calculator-runner";
 
 export const dynamic = "force-dynamic";
 
@@ -27,8 +29,9 @@ export default async function LeadMagnetPage({
   const isDownload = isDownloadKind(magnet.kind);
   const isQuiz = magnet.kind === "QUIZ";
   const isAudit = magnet.kind === "AUDIT_CALL";
-  const ctaLabel = magnet.ctaLabel || (isQuiz ? "Start the quiz" : isAudit ? "Apply now" : isDownload ? "Get the download" : "Get access");
-  const eyebrow = isQuiz ? "Free assessment" : isAudit ? "Apply for a call" : "Free resource";
+  const isCalc = magnet.kind === "CALCULATOR";
+  const ctaLabel = magnet.ctaLabel || (isQuiz ? "Start the quiz" : isAudit ? "Apply now" : isCalc ? "Calculate" : isDownload ? "Get the download" : "Get access");
+  const eyebrow = isQuiz ? "Free assessment" : isAudit ? "Apply for a call" : isCalc ? "Free calculator" : "Free resource";
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-14">
@@ -55,6 +58,15 @@ export default async function LeadMagnetPage({
           body={magnet.body}
           ctaLabel={ctaLabel}
           config={asAuditConfig(magnet.config)}
+          source={source}
+          contentItemId={contentItemId}
+        />
+      ) : isCalc ? (
+        <CalculatorRunner
+          slug={magnet.slug}
+          body={magnet.body}
+          ctaLabel={ctaLabel}
+          config={asCalculatorConfig(magnet.config)}
           source={source}
           contentItemId={contentItemId}
         />
