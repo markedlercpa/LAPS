@@ -6,7 +6,7 @@ import { QuizBuilder } from "@/components/leadmagnets/quiz-builder";
 import { AuditBuilder } from "@/components/leadmagnets/audit-builder";
 import { CalculatorBuilder } from "@/components/leadmagnets/calculator-builder";
 import { SnapshotBuilder } from "@/components/leadmagnets/snapshot-builder";
-import { getMagnet, magnetSubmissions, linkedContent } from "@/lib/leadmagnets/magnets";
+import { getMagnet, magnetSubmissions, linkedContent, magnetViewCount } from "@/lib/leadmagnets/magnets";
 import { storageConfigured } from "@/lib/staple/storage";
 import { KIND_LABELS, type LeadMagnetKindKey } from "@/lib/leadmagnets/taxonomy";
 
@@ -21,8 +21,9 @@ export default async function LeadMagnetDetail({ params }: { params: Promise<{ i
   const magnet = await getMagnet(id);
   if (!magnet) notFound();
 
-  const [subs, content] = await Promise.all([magnetSubmissions(id), linkedContent(id)]);
+  const [subs, content, views] = await Promise.all([magnetSubmissions(id), linkedContent(id), magnetViewCount(id)]);
   const leadCount = new Set(subs.map((s) => s.leadId).filter(Boolean)).size;
+  const conversion = views > 0 ? `${((subs.length / views) * 100).toFixed(1)}%` : "—";
   const publicUrl = `${appUrl()}/lm/${magnet.slug}`;
 
   return (
@@ -54,8 +55,10 @@ export default async function LeadMagnetDetail({ params }: { params: Promise<{ i
           {/* Attribution / performance */}
           <div className="card p-4">
             <div className="micro-label mb-2">Performance</div>
-            <div className="flex gap-6">
+            <div className="flex flex-wrap gap-6">
+              <div><div className="font-heading text-2xl font-extrabold">{views.toLocaleString()}</div><div className="text-[12px] text-muted">Views</div></div>
               <div><div className="font-heading text-2xl font-extrabold">{subs.length}</div><div className="text-[12px] text-muted">Submissions</div></div>
+              <div><div className="font-heading text-2xl font-extrabold text-accent">{conversion}</div><div className="text-[12px] text-muted">Conversion</div></div>
               <div><div className="font-heading text-2xl font-extrabold">{leadCount}</div><div className="text-[12px] text-muted">Leads created</div></div>
             </div>
           </div>

@@ -29,16 +29,18 @@ export type MagnetListRow = {
   title: string;
   status: LeadMagnetStatus;
   baseScore: number;
+  views: number;
   submissions: number;
   leads: number;
+  conversion: number | null; // submissions / views, null when no views yet
   updatedAt: Date;
 };
 
-/** All magnets with submission + distinct-lead counts, newest first. */
+/** All magnets with view / submission / lead counts + conversion, newest first. */
 export async function listMagnets(): Promise<MagnetListRow[]> {
   const magnets = await prisma.leadMagnet.findMany({
     orderBy: { updatedAt: "desc" },
-    include: { _count: { select: { submissions: true } }, submissions: { select: { leadId: true } } },
+    include: { _count: { select: { submissions: true, views: true } }, submissions: { select: { leadId: true } } },
   });
   return magnets.map((m) => ({
     id: m.id,
@@ -47,10 +49,26 @@ export async function listMagnets(): Promise<MagnetListRow[]> {
     title: m.title,
     status: m.status,
     baseScore: m.baseScore,
+    views: m._count.views,
     submissions: m._count.submissions,
     leads: new Set(m.submissions.map((s) => s.leadId).filter(Boolean)).size,
+    conversion: m._count.views > 0 ? m._count.submissions / m._count.views : null,
     updatedAt: m.updatedAt,
   }));
+}
+
+/** Record a landing-page view (conversion denominator). Only for published
+ * magnets; looked up by slug so the client can't inflate an arbitrary id. */
+export async function recordMagnetView(slug: string, source?: string | null, contentItemId?: string | null) {
+  const magnet = await prisma.leadMagnet.findFirst({ where: { slug, status: "PUBLISHED" }, select: { id: true } });
+  if (!magnet) return { ok: false as const };
+  await prisma.leadMagnetView.create({ data: { magnetId: magnet.id, source: source ?? null, contentItemId: contentItemId ?? null } });
+  return { ok: true as const };
+}
+
+/** View count for a magnet (conversion denominator on the detail page). */
+export function magnetViewCount(magnetId: string): Promise<number> {
+  return prisma.leadMagnetView.count({ where: { magnetId } });
 }
 
 export function getMagnet(id: string) {

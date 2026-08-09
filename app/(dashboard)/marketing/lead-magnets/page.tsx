@@ -29,7 +29,9 @@ export default async function LeadMagnetsPage() {
                 <th>Magnet</th>
                 <th>Type</th>
                 <th>Status</th>
+                <th className="num">Views</th>
                 <th className="num">Submissions</th>
+                <th className="num">Conv.</th>
                 <th className="num">Leads</th>
                 <th className="num">Score</th>
               </tr>
@@ -43,7 +45,9 @@ export default async function LeadMagnetsPage() {
                   </td>
                   <td className="text-muted">{KIND_LABELS[m.kind as LeadMagnetKindKey] ?? m.kind}</td>
                   <td><span className={`tag ${m.status === "PUBLISHED" ? "tag-accent" : "tag-neutral"}`}>{STATUS_LABELS[m.status]}</span></td>
+                  <td className="num">{m.views.toLocaleString()}</td>
                   <td className="num">{m.submissions.toLocaleString()}</td>
+                  <td className="num font-heading font-extrabold">{m.conversion == null ? "—" : `${(m.conversion * 100).toFixed(1)}%`}</td>
                   <td className="num">{m.leads.toLocaleString()}</td>
                   <td className="num text-muted">+{m.baseScore}</td>
                 </tr>

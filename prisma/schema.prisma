@@ -1643,10 +1643,25 @@ model LeadMagnet {
   updatedAt DateTime @updatedAt
 
   submissions  LeadMagnetSubmission[]
+  views        LeadMagnetView[]
   contentItems ContentItem[]          @relation("ContentCtaMagnet")
 
   @@index([status])
   @@index([kind])
+}
+
+/** One landing-page view — the denominator for conversion rate. Carries the
+ * same source / content attribution as submissions so conversion can be sliced
+ * by traffic source. Recorded client-side (real browser loads, not crawlers). */
+model LeadMagnetView {
+  id            String     @id @default(cuid())
+  magnetId      String
+  magnet        LeadMagnet @relation(fields: [magnetId], references: [id], onDelete: Cascade)
+  source        String?
+  contentItemId String?
+  createdAt     DateTime   @default(now())
+
+  @@index([magnetId])
 }
 
 /** One consumption event: capture → lead. Attribution links back to the content

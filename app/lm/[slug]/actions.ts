@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { captureSubmission, type CaptureInput, type CaptureResult } from "@/lib/leadmagnets/capture";
+import { recordMagnetView } from "@/lib/leadmagnets/magnets";
 import { asQuizConfig, scoreQuiz, type QuizBand } from "@/lib/leadmagnets/quiz";
 import { asAuditConfig, scoreAudit, qualifies } from "@/lib/leadmagnets/audit";
 import { asCalculatorConfig, computeCalculator } from "@/lib/leadmagnets/calculator";
@@ -11,6 +12,11 @@ import { asSnapshotConfig, computeSnapshot, type SnapshotInputs, type SnapshotRe
  * bridge and returns download access for file magnets. */
 export async function captureMagnetAction(input: CaptureInput): Promise<CaptureResult> {
   return captureSubmission(input);
+}
+
+/** Record a landing-page view (conversion denominator). Fired once per load. */
+export async function recordMagnetViewAction(input: { slug: string; source?: string | null; contentItemId?: string | null }) {
+  return recordMagnetView(input.slug, input.source, input.contentItemId);
 }
 
 export type QuizResult =

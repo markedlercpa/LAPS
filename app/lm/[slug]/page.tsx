@@ -5,6 +5,7 @@ import { asQuizConfig } from "@/lib/leadmagnets/quiz";
 import { asAuditConfig } from "@/lib/leadmagnets/audit";
 import { asCalculatorConfig } from "@/lib/leadmagnets/calculator";
 import { asSnapshotConfig } from "@/lib/leadmagnets/snapshot";
+import { MagnetView } from "@/components/leadmagnets/magnet-view";
 import { MagnetCapture } from "@/components/leadmagnets/magnet-capture";
 import { QuizRunner } from "@/components/leadmagnets/quiz-runner";
 import { AuditRunner } from "@/components/leadmagnets/audit-runner";
@@ -38,6 +39,7 @@ export default async function LeadMagnetPage({
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-14">
+      <MagnetView slug={magnet.slug} source={source} contentItemId={contentItemId} />
       <div className="mb-8">
         <p className="micro-label mb-2">{eyebrow}</p>
         <h1 className="mb-2">{magnet.headline || magnet.title}</h1>
