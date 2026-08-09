@@ -79,7 +79,7 @@ async function rawLinesForMonth(entityId: string | null, periodMonth: Date, stat
     const out: RawLine[] = [];
     for (const l of gl) {
       if (!l.ledgerAccount || isBeginningBalance(l.txnType)) continue;
-      out.push({ account: l.ledgerAccount, amount: Number(l.amount) });
+      out.push({ account: l.ledgerAccount, amount: glToDebitCredit(l.ledgerAccount, Number(l.amount)) });
     }
     return out;
   }
@@ -88,6 +88,17 @@ async function rawLinesForMonth(entityId: string | null, periodMonth: Date, stat
     include: { lines: { include: { ledgerAccount: true } } },
   });
   return periods.flatMap((p) => p.lines.map((l) => ({ account: l.ledgerAccount, amount: Number(l.amount) })));
+}
+
+/**
+ * QBO's general-ledger amount is *natural-side* (a credit-balance account like
+ * income reads positive). The statement math expects the trial-balance
+ * convention (debit +, credit −), so convert: negate credit-natural accounts.
+ * Downstream natural-side normalization then reads every account positive.
+ */
+function glToDebitCredit(account: { sourceType: string | null; classification: string | null }, natAmount: number): number {
+  const def = classifyAccount({ accountType: account.sourceType, classification: account.classification });
+  return def.naturalSide === "CREDIT" ? -natAmount : natAmount;
 }
 
 /** Same source split as `rawLinesForMonth`, over a month window, each line tagged
@@ -107,7 +118,7 @@ async function rawLinesForWindow(
     const out: (RawLine & { mk: string })[] = [];
     for (const l of gl) {
       if (!l.ledgerAccount || isBeginningBalance(l.txnType)) continue;
-      out.push({ account: l.ledgerAccount, amount: Number(l.amount), mk: monthKey(l.periodMonth) });
+      out.push({ account: l.ledgerAccount, amount: glToDebitCredit(l.ledgerAccount, Number(l.amount)), mk: monthKey(l.periodMonth) });
     }
     return out;
   }

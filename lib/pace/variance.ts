@@ -77,7 +77,11 @@ async function actualsByAccount(entityId: string | null, months: string[], state
     });
     for (const l of gl) {
       if (!l.ledgerAccount || isBeginningBalance(l.txnType)) continue;
-      add(l.ledgerAccount, Number(l.amount));
+      // QBO GL amount is natural-side; convert to debit +/credit − so `add`'s
+      // natural-side normalization reads every account positive.
+      const a = l.ledgerAccount;
+      const def = classifyAccount({ accountType: a.sourceType, classification: a.classification });
+      add(a, def.naturalSide === "CREDIT" ? -Number(l.amount) : Number(l.amount));
     }
   } else {
     const periods = await prisma.trialBalancePeriod.findMany({

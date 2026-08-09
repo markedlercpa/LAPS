@@ -1237,7 +1237,7 @@ model GeneralLedgerLine {
   name            String? // customer / vendor / payee
   memo            String?  @db.Text
   splitAccount    String? // the "split" (other side) account label from QBO
-  amount          Decimal  @db.Decimal(14, 2) // signed: debit +, credit -
+  amount          Decimal  @db.Decimal(14, 2) // QBO natural-side amount (credit-balance accounts read positive)
   externalTxnId   String? // QBO transaction id, when the report exposes it
   source          String   @default("qbo")
   createdAt       DateTime @default(now())

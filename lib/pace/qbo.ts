@@ -302,7 +302,7 @@ export type GlLine = {
   name?: string;
   memo?: string;
   splitAccount?: string;
-  amount: number; // signed: debit +, credit -
+  amount: number; // QBO natural-side amount (credit-balance accounts read positive)
   externalTxnId?: string;
 };
 
@@ -322,10 +322,12 @@ function columnIndex(columns: QboColumn[]): Record<string, number> {
 }
 
 /**
- * Parse a QBO GeneralLedger report into flat, signed GL lines. Columns are
- * matched by key (order varies), transactions are grouped under account section
- * headers, and amounts prefer explicit debit/credit columns (debit − credit),
- * falling back to the single signed natural-amount column. Pure — unit-testable.
+ * Parse a QBO GeneralLedger report into flat GL lines. Columns are matched by
+ * key (order varies) and transactions are grouped under account section headers.
+ * Amount is the QBO natural-side amount (`subt_nat_amount`) — a credit-balance
+ * account like income reads positive — which is what the report returns by
+ * default; a debit/credit column pair is only used as a fallback and is
+ * normalized to the same natural-side sign. Pure — unit-testable.
  */
 export function parseGeneralLedger(report: QboReportFull): GlLine[] {
   const cols = report.Columns?.Column ?? [];
@@ -360,11 +362,13 @@ export function parseGeneralLedger(report: QboReportFull): GlLine[] {
       if (r.ColData && iDate !== undefined) {
         const date = r.ColData[iDate]?.value?.trim();
         if (date && /^\d{4}-\d{2}-\d{2}/.test(date)) {
+          // Prefer QBO's natural-side amount column; fall back to debit − credit
+          // only when it's absent (rare). Both are treated as natural-side.
           const amount =
-            iDebit !== undefined || iCredit !== undefined
-              ? num(iDebit !== undefined ? r.ColData[iDebit]?.value : undefined) -
-                num(iCredit !== undefined ? r.ColData[iCredit]?.value : undefined)
-              : num(iAmt !== undefined ? r.ColData[iAmt]?.value : undefined);
+            iAmt !== undefined
+              ? num(r.ColData[iAmt]?.value)
+              : num(iDebit !== undefined ? r.ColData[iDebit]?.value : undefined) -
+                num(iCredit !== undefined ? r.ColData[iCredit]?.value : undefined);
           out.push({
             externalAccountId: current.id,
             accountName: current.name,
