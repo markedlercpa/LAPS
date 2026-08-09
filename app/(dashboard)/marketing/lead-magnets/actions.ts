@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { createMagnet, updateMagnet, setMagnetStatus, deleteMagnet } from "@/lib/leadmagnets/magnets";
 import { putObject, storageConfigured } from "@/lib/staple/storage";
 import { asQuizConfig } from "@/lib/leadmagnets/quiz";
+import { asAuditConfig } from "@/lib/leadmagnets/audit";
 
 async function requireUser() {
   const session = await auth();
@@ -74,6 +75,14 @@ export async function saveQuizConfigAction(id: string, config: unknown) {
   if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
   const clean = asQuizConfig(config);
   await updateMagnet(id, { config: clean as unknown as object });
+  revalidatePath(`/marketing/lead-magnets/${id}`);
+  return { ok: true as const };
+}
+
+/** Save the diagnostic/audit-call application config (questions + qualify rule). */
+export async function saveAuditConfigAction(id: string, config: unknown) {
+  if (!(await requireUser())) return { ok: false as const, error: "Not signed in" };
+  await updateMagnet(id, { config: asAuditConfig(config) as unknown as object });
   revalidatePath(`/marketing/lead-magnets/${id}`);
   return { ok: true as const };
 }

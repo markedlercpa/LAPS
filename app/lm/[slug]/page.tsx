@@ -2,8 +2,10 @@ import { notFound } from "next/navigation";
 import { getPublishedMagnetBySlug } from "@/lib/leadmagnets/magnets";
 import { isDownloadKind } from "@/lib/leadmagnets/taxonomy";
 import { asQuizConfig } from "@/lib/leadmagnets/quiz";
+import { asAuditConfig } from "@/lib/leadmagnets/audit";
 import { MagnetCapture } from "@/components/leadmagnets/magnet-capture";
 import { QuizRunner } from "@/components/leadmagnets/quiz-runner";
+import { AuditRunner } from "@/components/leadmagnets/audit-runner";
 
 export const dynamic = "force-dynamic";
 
@@ -24,12 +26,14 @@ export default async function LeadMagnetPage({
   const contentItemId = sp.c ?? null;
   const isDownload = isDownloadKind(magnet.kind);
   const isQuiz = magnet.kind === "QUIZ";
-  const ctaLabel = magnet.ctaLabel || (isQuiz ? "Start the quiz" : isDownload ? "Get the download" : "Get access");
+  const isAudit = magnet.kind === "AUDIT_CALL";
+  const ctaLabel = magnet.ctaLabel || (isQuiz ? "Start the quiz" : isAudit ? "Apply now" : isDownload ? "Get the download" : "Get access");
+  const eyebrow = isQuiz ? "Free assessment" : isAudit ? "Apply for a call" : "Free resource";
 
   return (
     <main className="mx-auto max-w-2xl px-5 py-14">
       <div className="mb-8">
-        <p className="micro-label mb-2">{isQuiz ? "Free assessment" : "Free resource"}</p>
+        <p className="micro-label mb-2">{eyebrow}</p>
         <h1 className="mb-2">{magnet.headline || magnet.title}</h1>
         {magnet.subhead && <p className="text-[16px] text-muted">{magnet.subhead}</p>}
       </div>
@@ -42,6 +46,15 @@ export default async function LeadMagnetPage({
           body={magnet.body}
           ctaLabel={ctaLabel}
           config={asQuizConfig(magnet.config)}
+          source={source}
+          contentItemId={contentItemId}
+        />
+      ) : isAudit ? (
+        <AuditRunner
+          slug={magnet.slug}
+          body={magnet.body}
+          ctaLabel={ctaLabel}
+          config={asAuditConfig(magnet.config)}
           source={source}
           contentItemId={contentItemId}
         />
