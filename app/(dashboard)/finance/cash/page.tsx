@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { MetricRow } from "@/components/metric-row";
@@ -31,12 +32,28 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
         <Link href="/finance/cash/assumptions" className="btn btn-ghost">Assumptions</Link>
       </PageHeader>
 
-      {mode === "monthly" ? await MonthlyView() : await DirectView(mode)}
+      <Suspense key={mode} fallback={<ForecastSkeleton />}>
+        {mode === "monthly" ? <MonthlyView /> : <DirectView mode={mode} />}
+      </Suspense>
     </div>
   );
 }
 
-async function DirectView(mode: "daily" | "weekly") {
+function ForecastSkeleton() {
+  return (
+    <div className="mt-6 animate-pulse">
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-16 rounded-sm bg-surface" />)}
+      </div>
+      <div className="space-y-1.5">
+        {Array.from({ length: 12 }).map((_, i) => <div key={i} className="h-6 rounded-sm bg-surface" />)}
+      </div>
+      <p className="mt-3 text-[12px] text-muted">Loading forecast…</p>
+    </div>
+  );
+}
+
+async function DirectView({ mode }: { mode: "daily" | "weekly" }) {
   const f = await buildDirectForecast(mode);
   const endingLast = f.ending[f.ending.length - 1] ?? f.opening.cents;
   const fcEnding = f.ending.slice(f.firstFc); // forecast horizon only

@@ -1,7 +1,9 @@
+import { revalidateTag } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { pullTrialBalance, pullGeneralLedger, syncLedgerAccounts, pullChangedMonths, CDC_MAX_LOOKBACK_DAYS } from "@/lib/pace/qbo";
 import { importTrialBalance } from "@/lib/pace/import";
 import { importGeneralLedger } from "@/lib/pace/gl";
+import { AGING_CACHE_TAG } from "@/lib/pace/aging";
 
 /**
  * QBO actuals sync — incremental by default. Shared by the interactive "Sync
@@ -131,6 +133,9 @@ export async function syncEntityActuals(entityId: string, opts?: { monthsBack?: 
   await prisma.ledgerConnection
     .update({ where: { entityId }, data: { lastSyncAt: new Date(), lastSyncStatus: "ok" } })
     .catch(() => null);
+
+  // Fresh ledger data → drop the cached AR/AP aging so the next render re-pulls.
+  try { revalidateTag(AGING_CACHE_TAG); } catch { /* not in a request context (rare) */ }
 
   return {
     ok: true,

@@ -1,6 +1,24 @@
 import { createHash } from "crypto";
+import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { qboConfigured, pullArAging, pullApAging, type AgingItem } from "@/lib/pace/qbo";
+
+/** Cache tag for the live QBO aging pulls; busted on a QBO sync. */
+export const AGING_CACHE_TAG = "qbo-aging";
+const AGING_TTL = 180; // seconds — aging changes slowly; the sync also busts it
+
+/**
+ * QBO aging is otherwise pulled live from Intuit on every page render (slow —
+ * a network round-trip in the request path). Cache each entity's AR/AP pull for
+ * a short TTL, shared across the cash forecast and the Assumptions worktable, and
+ * invalidated whenever a QBO sync runs. Falls back to a live pull on a miss.
+ */
+export function cachedPullArAging(entityId: string): Promise<AgingItem[] | null> {
+  return unstable_cache(() => pullArAging(entityId), ["qbo-ar-aging", entityId], { revalidate: AGING_TTL, tags: [AGING_CACHE_TAG] })();
+}
+export function cachedPullApAging(entityId: string): Promise<AgingItem[] | null> {
+  return unstable_cache(() => pullApAging(entityId), ["qbo-ap-aging", entityId], { revalidate: AGING_TTL, tags: [AGING_CACHE_TAG] })();
+}
 
 /**
  * QBO AR/AP aging as an editable forecast input. Each open item gets a stable
@@ -68,7 +86,7 @@ export async function listAging(): Promise<AgingList> {
   out.connectedEntities = conns.length;
 
   for (const c of conns) {
-    const [ar, ap] = await Promise.all([pullArAging(c.entityId), pullApAging(c.entityId)]);
+    const [ar, ap] = await Promise.all([cachedPullArAging(c.entityId), cachedPullApAging(c.entityId)]);
     const build = (items: AgingItem[] | null, kind: AgingKind): AgingRow[] =>
       (items ?? []).map((it) => {
         const itemKey = agingItemKey(kind, c.entityId, it);

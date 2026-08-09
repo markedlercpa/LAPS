@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { prisma } from "@/lib/prisma";
 import { PageHeader } from "@/components/page-header";
 import { StatementMulti } from "@/components/pace/statement-multi";
@@ -6,6 +7,59 @@ import { formatCurrency } from "@/lib/utils";
 import { qboConfigured } from "@/lib/pace/qbo";
 import { ImportTbButton } from "@/components/pace/import-tb";
 import { QboSyncButton } from "@/components/pace/qbo-sync";
+
+function StatementSkeleton() {
+  return (
+    <div className="animate-pulse space-y-1.5">
+      {Array.from({ length: 14 }).map((_, i) => <div key={i} className="h-7 rounded-sm bg-surface" />)}
+      <p className="pt-1 text-[12px] text-muted">Loading statement…</p>
+    </div>
+  );
+}
+
+/** The heavy statement build, streamed so the header + filters paint first. */
+async function StatementSection({
+  entityId, consolidated, asOf, view, cols,
+}: {
+  entityId: string; consolidated: boolean; asOf: string; view: "IS" | "BS"; cols: ColumnKey[];
+}) {
+  const [data, period] = await Promise.all([
+    buildStatementColumns(consolidated ? null : entityId, asOf, view, cols),
+    !consolidated
+      ? prisma.trialBalancePeriod.findUnique({
+          where: { entityId_periodMonth: { entityId, periodMonth: new Date(`${asOf}-01`) } },
+          select: { balanced: true, status: true, source: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (!data || data.groups.length === 0) {
+    return (
+      <p className="text-[14px] text-muted">
+        {qboConfigured() && !consolidated
+          ? "No trial balances loaded yet. Click “Sync from QBO” to pull actuals — that also fills the month picker."
+          : "No trial balance loaded for this selection. Use “Import trial balance” to add one."}
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {period && <span className={`tag ${period.balanced ? "tag-accent" : "tag-outline"}`}>{period.balanced ? "Balanced" : "Out of balance"}</span>}
+        {period && <span className="tag tag-neutral">{period.status === "CLOSED" ? "Closed" : "Open"}</span>}
+        {period && <span className="tag tag-neutral">Source: {period.source}</span>}
+        {consolidated && <span className="tag tag-outline">Consolidated</span>}
+        {Math.abs(data.unclassifiedAmount[0] ?? 0) >= 0.5 && (
+          <span className="tag tag-outline" title="Accounts QuickBooks didn't tag with an AccountType.">
+            Unclassified: {formatCurrency(data.unclassifiedAmount[0])}
+          </span>
+        )}
+      </div>
+      <StatementMulti data={data} entityParam={consolidated ? "all" : entityId} />
+    </>
+  );
+}
 
 export const dynamic = "force-dynamic";
 
@@ -40,16 +94,7 @@ export default async function ActualsPage({
     : view === "IS" ? DEFAULT_IS : DEFAULT_BS;
   const cols = requested.length ? requested : [available[0]];
 
-  const data = (asOf && (consolidated || entitySel))
-    ? await buildStatementColumns(consolidated ? null : entitySel, asOf, view, cols)
-    : null;
-
-  const period = !consolidated && asOf
-    ? await prisma.trialBalancePeriod.findUnique({
-        where: { entityId_periodMonth: { entityId: entitySel, periodMonth: new Date(`${asOf}-01`) } },
-        select: { balanced: true, status: true, source: true },
-      })
-    : null;
+  const hasSelection = !!(asOf && (consolidated || entitySel));
 
   return (
     <div>
@@ -107,27 +152,16 @@ export default async function ActualsPage({
             <button className="btn btn-secondary" type="submit">View</button>
           </form>
 
-          {!data || data.groups.length === 0 ? (
+          {!hasSelection ? (
             <p className="text-[14px] text-muted">
               {qboConfigured() && !consolidated
                 ? "No trial balances loaded yet. Click “Sync from QBO” to pull actuals — that also fills the month picker."
                 : "No trial balance loaded for this selection. Use “Import trial balance” to add one."}
             </p>
           ) : (
-            <>
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                {period && <span className={`tag ${period.balanced ? "tag-accent" : "tag-outline"}`}>{period.balanced ? "Balanced" : "Out of balance"}</span>}
-                {period && <span className="tag tag-neutral">{period.status === "CLOSED" ? "Closed" : "Open"}</span>}
-                {period && <span className="tag tag-neutral">Source: {period.source}</span>}
-                {consolidated && <span className="tag tag-outline">Consolidated</span>}
-                {Math.abs(data.unclassifiedAmount[0] ?? 0) >= 0.5 && (
-                  <span className="tag tag-outline" title="Accounts QuickBooks didn't tag with an AccountType.">
-                    Unclassified: {formatCurrency(data.unclassifiedAmount[0])}
-                  </span>
-                )}
-              </div>
-              <StatementMulti data={data} entityParam={consolidated ? "all" : entitySel} />
-            </>
+            <Suspense key={`${entitySel}-${asOf}-${view}-${cols.join(",")}`} fallback={<StatementSkeleton />}>
+              <StatementSection entityId={entitySel} consolidated={consolidated} asOf={asOf} view={view} cols={cols} />
+            </Suspense>
           )}
         </>
       )}

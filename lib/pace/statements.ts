@@ -48,12 +48,9 @@ function monthStart(iso: string): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
 }
 
-/** QBO seeds each account's opening figure with a "Beginning Balance" GL row.
- * Those belong on the balance sheet (carried by the trial balance), never in
- * P&L period activity — filter them out of any GL-sourced income statement. */
-function isBeginningBalance(txnType: string | null): boolean {
-  return (txnType ?? "").trim().toLowerCase() === "beginning balance";
-}
+// QBO seeds each account's opening figure with a "Beginning Balance" GL row.
+// Those belong on the balance sheet (carried by the trial balance), never in
+// P&L period activity — the GL-sourced income statement filters them in SQL.
 
 type LedgerAccountRow = {
   id: string;
@@ -67,27 +64,61 @@ type LedgerAccountRow = {
 };
 type RawLine = { account: LedgerAccountRow; amount: number };
 
-/** Income statement is period *activity* → built from the general ledger
+const ACCOUNT_SELECT = {
+  id: true, externalId: true, acctNum: true, name: true, fqName: true, sourceType: true, classification: true, accountSubType: true,
+} as const;
+
+/**
+ * Exclude QBO "Beginning Balance" GL rows while KEEPING null-txnType rows.
+ * Prisma's `not` drops nulls, so an explicit OR is required — otherwise every
+ * normal line with no txnType would vanish from the P&L.
+ */
+const EXCLUDE_BEGINNING_BALANCE = {
+  OR: [{ txnType: null }, { txnType: { not: "Beginning Balance" } }],
+};
+
+/** Batch-load account metadata for a set of ids (one small row per account). */
+async function accountsById(ids: string[]): Promise<Map<string, LedgerAccountRow>> {
+  const unique = [...new Set(ids)];
+  if (!unique.length) return new Map();
+  const accts = await prisma.ledgerAccount.findMany({ where: { id: { in: unique } }, select: ACCOUNT_SELECT });
+  return new Map(accts.map((a) => [a.id, a]));
+}
+
+/**
+ * Income statement is period *activity* → built from the general ledger
  * (beginning balances excluded). Balance sheet is a point-in-time *balance* →
- * built from the trial balance (beginning balances included). */
+ * built from the trial balance (beginning balances included). Both aggregate in
+ * SQL (one summed row per account) rather than shipping every line into JS.
+ */
 async function rawLinesForMonth(entityId: string | null, periodMonth: Date, statement: StatementKind): Promise<RawLine[]> {
   if (statement === "IS") {
-    const gl = await prisma.generalLedgerLine.findMany({
-      where: { periodMonth, ...(entityId ? { entityId } : {}) },
-      include: { ledgerAccount: true },
+    const grp = await prisma.generalLedgerLine.groupBy({
+      by: ["ledgerAccountId"],
+      where: { periodMonth, ...(entityId ? { entityId } : {}), ledgerAccountId: { not: null }, ...EXCLUDE_BEGINNING_BALANCE },
+      _sum: { amount: true },
     });
+    const accts = await accountsById(grp.map((g) => g.ledgerAccountId).filter((x): x is string => !!x));
     const out: RawLine[] = [];
-    for (const l of gl) {
-      if (!l.ledgerAccount || isBeginningBalance(l.txnType)) continue;
-      out.push({ account: l.ledgerAccount, amount: glToDebitCredit(l.ledgerAccount, Number(l.amount)) });
+    for (const g of grp) {
+      const a = g.ledgerAccountId ? accts.get(g.ledgerAccountId) : undefined;
+      if (!a) continue;
+      out.push({ account: a, amount: glToDebitCredit(a, Number(g._sum.amount ?? 0)) });
     }
     return out;
   }
-  const periods = await prisma.trialBalancePeriod.findMany({
-    where: { periodMonth, ...(entityId ? { entityId } : {}) },
-    include: { lines: { include: { ledgerAccount: true } } },
+  const grp = await prisma.trialBalanceLine.groupBy({
+    by: ["ledgerAccountId"],
+    where: { period: { periodMonth, ...(entityId ? { entityId } : {}) } },
+    _sum: { amount: true },
   });
-  return periods.flatMap((p) => p.lines.map((l) => ({ account: l.ledgerAccount, amount: Number(l.amount) })));
+  const accts = await accountsById(grp.map((g) => g.ledgerAccountId));
+  const out: RawLine[] = [];
+  for (const g of grp) {
+    const a = accts.get(g.ledgerAccountId);
+    if (a) out.push({ account: a, amount: Number(g._sum.amount ?? 0) });
+  }
+  return out;
 }
 
 /**
@@ -111,22 +142,39 @@ async function rawLinesForWindow(
   statement: StatementKind,
 ): Promise<(RawLine & { mk: string })[]> {
   if (statement === "IS") {
-    const gl = await prisma.generalLedgerLine.findMany({
-      where: { periodMonth: { gte: windowStart, lte: windowEnd }, ...(entityId ? { entityId } : {}) },
-      include: { ledgerAccount: true },
+    const grp = await prisma.generalLedgerLine.groupBy({
+      by: ["ledgerAccountId", "periodMonth"],
+      where: { periodMonth: { gte: windowStart, lte: windowEnd }, ...(entityId ? { entityId } : {}), ledgerAccountId: { not: null }, ...EXCLUDE_BEGINNING_BALANCE },
+      _sum: { amount: true },
     });
+    const accts = await accountsById(grp.map((g) => g.ledgerAccountId).filter((x): x is string => !!x));
     const out: (RawLine & { mk: string })[] = [];
-    for (const l of gl) {
-      if (!l.ledgerAccount || isBeginningBalance(l.txnType)) continue;
-      out.push({ account: l.ledgerAccount, amount: glToDebitCredit(l.ledgerAccount, Number(l.amount)), mk: monthKey(l.periodMonth) });
+    for (const g of grp) {
+      const a = g.ledgerAccountId ? accts.get(g.ledgerAccountId) : undefined;
+      if (!a) continue;
+      out.push({ account: a, amount: glToDebitCredit(a, Number(g._sum.amount ?? 0)), mk: monthKey(g.periodMonth) });
     }
     return out;
   }
-  const periods = await prisma.trialBalancePeriod.findMany({
-    where: { periodMonth: { gte: windowStart, lte: windowEnd }, ...(entityId ? { entityId } : {}) },
-    include: { lines: { include: { ledgerAccount: true } } },
+  // BS: group by period + account (period carries the month), then resolve months.
+  const grp = await prisma.trialBalanceLine.groupBy({
+    by: ["periodId", "ledgerAccountId"],
+    where: { period: { periodMonth: { gte: windowStart, lte: windowEnd }, ...(entityId ? { entityId } : {}) } },
+    _sum: { amount: true },
   });
-  return periods.flatMap((p) => p.lines.map((l) => ({ account: l.ledgerAccount, amount: Number(l.amount), mk: monthKey(p.periodMonth) })));
+  const periodRows = await prisma.trialBalancePeriod.findMany({
+    where: { id: { in: [...new Set(grp.map((g) => g.periodId))] } },
+    select: { id: true, periodMonth: true },
+  });
+  const mkByPeriod = new Map(periodRows.map((p) => [p.id, monthKey(p.periodMonth)]));
+  const accts = await accountsById(grp.map((g) => g.ledgerAccountId));
+  const out: (RawLine & { mk: string })[] = [];
+  for (const g of grp) {
+    const a = accts.get(g.ledgerAccountId);
+    const mk = mkByPeriod.get(g.periodId);
+    if (a && mk) out.push({ account: a, amount: Number(g._sum.amount ?? 0), mk });
+  }
+  return out;
 }
 
 function leafName(fqName: string | null, name: string): string {

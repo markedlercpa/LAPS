@@ -3,8 +3,8 @@ import { isoWeekOf, isoWeekStart } from "@/lib/work-taxonomy";
 import { rateForBandWeek } from "@/lib/work/capacity";
 import { latestBankCashCents, buildStatement } from "@/lib/pace/statements";
 import { classifyAccount } from "@/lib/pace/qbo-taxonomy";
-import { qboConfigured, pullArAging, pullApAging, type AgingItem } from "@/lib/pace/qbo";
-import { agingItemKey, effectiveAgingDate, getAgingOverrides, type AgingKind, type AgingOverride } from "@/lib/pace/aging";
+import { qboConfigured, type AgingItem } from "@/lib/pace/qbo";
+import { agingItemKey, effectiveAgingDate, getAgingOverrides, cachedPullArAging, cachedPullApAging, type AgingKind, type AgingOverride } from "@/lib/pace/aging";
 import { CASH_CATEGORY_MAP, categoriesFor, type CashMode } from "@/lib/pace/cash-taxonomy";
 
 /**
@@ -330,10 +330,14 @@ export async function buildDirectForecast(mode: "daily" | "weekly"): Promise<Dir
       getAgingOverrides(),
     ]);
     sources.qboConnectedEntities = conns.length;
-    for (const c of conns) {
-      const [ar, ap] = await Promise.all([pullArAging(c.entityId), pullApAging(c.entityId)]);
-      if (ar) { sources.arParsed += ar.length; const r = spreadAging(ar, "ar_collections", 1, "AR", c.entityId, overrides); sources.arItems += r.items; sources.arCents += r.cents; }
-      if (ap) { sources.apParsed += ap.length; const r = spreadAging(ap, "ap_payments", -1, "AP", c.entityId, overrides); sources.apItems += r.items; sources.apCents += r.cents; }
+    // Pull every connected entity's AR + AP in parallel (cached, so QBO is hit
+    // at most once per TTL rather than on every render).
+    const pulls = await Promise.all(
+      conns.map(async (c) => ({ entityId: c.entityId, ar: await cachedPullArAging(c.entityId), ap: await cachedPullApAging(c.entityId) })),
+    );
+    for (const { entityId, ar, ap } of pulls) {
+      if (ar) { sources.arParsed += ar.length; const r = spreadAging(ar, "ar_collections", 1, "AR", entityId, overrides); sources.arItems += r.items; sources.arCents += r.cents; }
+      if (ap) { sources.apParsed += ap.length; const r = spreadAging(ap, "ap_payments", -1, "AP", entityId, overrides); sources.apItems += r.items; sources.apCents += r.cents; }
     }
   }
 
@@ -547,7 +551,7 @@ async function budgetPnlMonthly(monthKeys: string[]): Promise<Record<string, { r
  * the same figures the Actuals P&L shows — for the trailing actual months. */
 async function actualMonthlyPnl(monthKeys: string[]): Promise<Record<string, PnlCents & { present: boolean }>> {
   const out: Record<string, PnlCents & { present: boolean }> = {};
-  for (const mk of monthKeys) {
+  await Promise.all(monthKeys.map(async (mk) => {
     const st = await buildStatement(null, `${mk}-01`, "IS");
     const p: PnlCents & { present: boolean } = { revenue: 0, cogs: 0, opex: 0, dna: 0, interest: 0, tax: 0, present: st.lines.length > 0 };
     const s = st.subtotals;
@@ -563,7 +567,7 @@ async function actualMonthlyPnl(monthKeys: string[]): Promise<Record<string, Pnl
       else p.opex += cents;
     }
     out[mk] = p;
-  }
+  }));
   return out;
 }
 
@@ -571,11 +575,11 @@ async function actualMonthlyPnl(monthKeys: string[]): Promise<Record<string, Pnl
  * sheets. null when that month has no balance sheet loaded. */
 async function actualMonthEndCash(monthKeys: string[]): Promise<Record<string, number | null>> {
   const out: Record<string, number | null> = {};
-  for (const mk of monthKeys) {
+  await Promise.all(monthKeys.map(async (mk) => {
     const bs = await buildStatement(null, `${mk}-01`, "BS");
     const bank = bs.lines.filter((l) => l.accountType === "Bank");
     out[mk] = bank.length ? Math.round(bank.reduce((s, l) => s + l.amount, 0) * 100) : null;
-  }
+  }));
   return out;
 }
 
