@@ -506,11 +506,17 @@ model Prospect {
   email             String?
   phone             String?
   website           String?
+  linkedinUrl       String?
   industry          String?
   revenueEstimate   Decimal?       @db.Decimal(14, 2)
   headcountEstimate Int?
   tier              String         @default("B") // Dream 100 tier: A | B | C
   status            ProspectStatus @default(COLD)
+  // Top-of-funnel research
+  researchStatus    ProspectResearchStatus @default(TO_RESEARCH)
+  signal            String? // the trigger / "why now" hook (funding, hiring, exit intent…)
+  fitNotes          String?        @db.Text // research write-up: fit, angle, account notes
+  tags              String[]       @default([])
   source            String? // list / import batch name
   notes             String?        @db.Text
   ownerId           String?
@@ -518,10 +524,32 @@ model Prospect {
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
-  owner User? @relation("ProspectOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  owner   User?           @relation("ProspectOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  touches ProspectTouch[]
 
   @@index([status])
   @@index([tier])
+  @@index([researchStatus])
+}
+
+enum ProspectResearchStatus {
+  TO_RESEARCH
+  RESEARCHED
+  READY
+}
+
+/** A research/outreach touch on a prospect — the top-of-funnel activity log. */
+model ProspectTouch {
+  id         String   @id @default(cuid())
+  prospectId String
+  prospect   Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  kind       String   @default("note") // note | research | call | email | linkedin
+  body       String   @db.Text
+  byUserId   String?
+  occurredAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([prospectId])
 }
 
 /// Per-period sales targets shown against actuals on the reporting page.

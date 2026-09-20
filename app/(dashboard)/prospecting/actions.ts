@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
-import type { ProspectStatus } from "@prisma/client";
+import type { ProspectStatus, ProspectResearchStatus } from "@prisma/client";
 
 async function currentUserId(): Promise<string | null> {
   const session = await auth();
@@ -61,6 +61,86 @@ export async function updateProspectStatus(id: string, status: ProspectStatus) {
 export async function deleteProspect(id: string) {
   await prisma.prospect.delete({ where: { id } });
   revalidatePath("/prospecting");
+  return { ok: true as const };
+}
+
+// ── Top-of-funnel research ───────────────────────────────────────────────────
+const researchSchema = z.object({
+  id: z.string().min(1),
+  contactName: z.string().optional().nullable(),
+  title: z.string().optional().nullable(),
+  email: z.string().email().optional().or(z.literal("")).nullable(),
+  phone: z.string().optional().nullable(),
+  website: z.string().optional().nullable(),
+  linkedinUrl: z.string().optional().nullable(),
+  industry: z.string().optional().nullable(),
+  tier: z.enum(["A", "B", "C"]).optional(),
+  revenueEstimate: z.coerce.number().nonnegative().optional().or(z.nan().transform(() => undefined)),
+  headcountEstimate: z.coerce.number().int().nonnegative().optional().or(z.nan().transform(() => undefined)),
+  researchStatus: z.enum(["TO_RESEARCH", "RESEARCHED", "READY"]).optional(),
+  signal: z.string().optional().nullable(),
+  fitNotes: z.string().optional().nullable(),
+  tags: z.array(z.string()).optional(),
+  notes: z.string().optional().nullable(),
+});
+
+/** Save the research write-up + account details on a prospect. */
+export async function updateProspectResearch(input: unknown) {
+  if (!(await currentUserId())) return { ok: false as const, error: "Not signed in" };
+  const parsed = researchSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const { id, ...d } = parsed.data;
+  await prisma.prospect.update({
+    where: { id },
+    data: {
+      ...(d.contactName !== undefined ? { contactName: d.contactName || null } : {}),
+      ...(d.title !== undefined ? { title: d.title || null } : {}),
+      ...(d.email !== undefined ? { email: d.email || null } : {}),
+      ...(d.phone !== undefined ? { phone: d.phone || null } : {}),
+      ...(d.website !== undefined ? { website: d.website || null } : {}),
+      ...(d.linkedinUrl !== undefined ? { linkedinUrl: d.linkedinUrl || null } : {}),
+      ...(d.industry !== undefined ? { industry: d.industry || null } : {}),
+      ...(d.tier !== undefined ? { tier: d.tier } : {}),
+      ...(d.revenueEstimate !== undefined ? { revenueEstimate: Number.isNaN(d.revenueEstimate) ? null : d.revenueEstimate ?? null } : {}),
+      ...(d.headcountEstimate !== undefined ? { headcountEstimate: Number.isNaN(d.headcountEstimate as number) ? null : d.headcountEstimate ?? null } : {}),
+      ...(d.researchStatus !== undefined ? { researchStatus: d.researchStatus } : {}),
+      ...(d.signal !== undefined ? { signal: d.signal || null } : {}),
+      ...(d.fitNotes !== undefined ? { fitNotes: d.fitNotes || null } : {}),
+      ...(d.tags !== undefined ? { tags: d.tags } : {}),
+      ...(d.notes !== undefined ? { notes: d.notes || null } : {}),
+    },
+  });
+  revalidatePath("/prospecting");
+  revalidatePath(`/prospecting/${id}`);
+  return { ok: true as const };
+}
+
+export async function setResearchStatus(id: string, researchStatus: ProspectResearchStatus) {
+  await prisma.prospect.update({ where: { id }, data: { researchStatus } });
+  revalidatePath("/prospecting");
+  revalidatePath(`/prospecting/${id}`);
+  return { ok: true as const };
+}
+
+const touchSchema = z.object({
+  prospectId: z.string().min(1),
+  kind: z.enum(["note", "research", "call", "email", "linkedin"]).default("note"),
+  body: z.string().min(1, "Add a note"),
+});
+
+/** Log a research/outreach touch (the top-of-funnel activity log). */
+export async function addProspectTouch(input: unknown) {
+  const byUserId = await currentUserId();
+  const parsed = touchSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  await prisma.prospectTouch.create({ data: { prospectId: parsed.data.prospectId, kind: parsed.data.kind, body: parsed.data.body, byUserId } });
+  revalidatePath(`/prospecting/${parsed.data.prospectId}`);
+  return { ok: true as const };
+}
+
+export async function deleteProspectTouch(id: string, prospectId: string) {
+  await prisma.prospectTouch.delete({ where: { id } });
+  revalidatePath(`/prospecting/${prospectId}`);
   return { ok: true as const };
 }
 

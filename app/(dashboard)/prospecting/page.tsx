@@ -20,6 +20,7 @@ export default async function ProspectingPage() {
     industry: p.industry,
     tier: p.tier,
     status: p.status,
+    researchStatus: p.researchStatus,
     revenueEstimate: p.revenueEstimate != null ? Number(p.revenueEstimate) : null,
     headcountEstimate: p.headcountEstimate,
     source: p.source,

@@ -2,7 +2,8 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { ProspectStatus } from "@prisma/client";
+import Link from "next/link";
+import type { ProspectStatus, ProspectResearchStatus } from "@prisma/client";
 import { DataTable, distinctOptions, type Column, type FilterDef } from "@/components/data-table";
 import { promoteProspect, updateProspectStatus } from "@/app/(dashboard)/prospecting/actions";
 
@@ -15,6 +16,12 @@ export const PROSPECT_STATUS_LABELS: Record<ProspectStatus, string> = {
   DISQUALIFIED: "Disqualified",
 };
 
+export const RESEARCH_STATUS_LABELS: Record<ProspectResearchStatus, string> = {
+  TO_RESEARCH: "To research",
+  RESEARCHED: "Researched",
+  READY: "Ready",
+};
+
 export type ProspectRow = {
   id: string;
   companyName: string;
@@ -23,6 +30,7 @@ export type ProspectRow = {
   industry: string | null;
   tier: string;
   status: ProspectStatus;
+  researchStatus: ProspectResearchStatus;
   revenueEstimate: number | null;
   headcountEstimate: number | null;
   source: string | null;
@@ -41,9 +49,15 @@ export function ProspectsTable({ rows }: { rows: ProspectRow[] }) {
   const [pending, startTransition] = useTransition();
 
   const columns: Column<ProspectRow>[] = [
-    { key: "companyName", header: "Company", sortable: true, render: (r) => <span className="font-heading font-extrabold">{r.companyName}</span> },
+    { key: "companyName", header: "Company", sortable: true, render: (r) => <Link href={`/prospecting/${r.id}`} className="font-heading font-extrabold text-accent-700">{r.companyName}</Link> },
     { key: "contactName", header: "Contact", render: (r) => <span>{r.contactName ?? "—"}{r.title ? <span className="text-muted"> · {r.title}</span> : null}</span> },
     { key: "tier", header: "Tier", sortable: true, render: (r) => <span className="tag tag-outline">{r.tier}</span> },
+    {
+      key: "researchStatus",
+      header: "Research",
+      sortable: true,
+      render: (r) => <span className={`tag ${r.researchStatus === "READY" ? "tag-accent" : "tag-neutral"}`}>{RESEARCH_STATUS_LABELS[r.researchStatus]}</span>,
+    },
     {
       key: "revenueEstimate",
       header: "Est. rev",
@@ -107,6 +121,7 @@ export function ProspectsTable({ rows }: { rows: ProspectRow[] }) {
 
   const filters: FilterDef<ProspectRow>[] = [
     { key: "status", label: "Status", getValue: (r) => r.status, options: (Object.keys(PROSPECT_STATUS_LABELS) as ProspectStatus[]).map((s) => ({ value: s, label: PROSPECT_STATUS_LABELS[s] })) },
+    { key: "researchStatus", label: "Research", getValue: (r) => r.researchStatus, options: (Object.keys(RESEARCH_STATUS_LABELS) as ProspectResearchStatus[]).map((s) => ({ value: s, label: RESEARCH_STATUS_LABELS[s] })) },
     { key: "tier", label: "Tier", getValue: (r) => r.tier, options: [{ value: "A", label: "A" }, { value: "B", label: "B" }, { value: "C", label: "C" }] },
     { key: "source", label: "Source", getValue: (r) => r.source ?? "", options: distinctOptions(rows, (r) => r.source) },
   ];
